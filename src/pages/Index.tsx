@@ -3,11 +3,16 @@ import { FileUpload } from '@/components/FileUpload';
 import { DataTable } from '@/components/DataTable';
 import { CleanupRules } from '@/components/CleanupRules';
 import { ChangeLogView } from '@/components/ChangeLogView';
-import { DataRow, ChangeLog, CleanupRule } from '@/types/data';
+import { TaxonomyManager } from '@/components/TaxonomyManager';
+import { ValidationIssues } from '@/components/ValidationIssues';
+import { Dashboard } from '@/components/Dashboard';
+import { DataRow, ChangeLog, CleanupRule, TaxonomyData, ValidationIssue } from '@/types/data';
 import { Button } from '@/components/ui/button';
-import { Download, Play, RotateCcw } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
 import { exportToExcel } from '@/utils/fileHandlers';
 import { applyCleanupRules } from '@/utils/dataCleanup';
+import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
 
 const defaultRules: CleanupRule[] = [
@@ -50,6 +55,9 @@ const Index = () => {
   const [currentData, setCurrentData] = useState<DataRow[]>([]);
   const [changes, setChanges] = useState<ChangeLog[]>([]);
   const [rules, setRules] = useState<CleanupRule[]>(defaultRules);
+  const [taxonomy, setTaxonomy] = useState<TaxonomyData>({});
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
+  const [activeTab, setActiveTab] = useState('data');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -57,16 +65,32 @@ const Index = () => {
     if (savedRules) {
       setRules(JSON.parse(savedRules));
     }
+    
+    const savedTaxonomy = localStorage.getItem('taxonomy');
+    if (savedTaxonomy) {
+      setTaxonomy(JSON.parse(savedTaxonomy));
+    }
   }, []);
 
   useEffect(() => {
     localStorage.setItem('cleanupRules', JSON.stringify(rules));
   }, [rules]);
 
+  useEffect(() => {
+    localStorage.setItem('taxonomy', JSON.stringify(taxonomy));
+  }, [taxonomy]);
+
+  useEffect(() => {
+    if (currentData.length > 0 && Object.keys(taxonomy).length > 0) {
+      runValidation();
+    }
+  }, [currentData, taxonomy]);
+
   const handleDataLoaded = (data: DataRow[]) => {
     setOriginalData(data);
     setCurrentData(data);
     setChanges([]);
+    setValidationIssues([]);
     
     const columns = data.length > 0 ? Object.keys(data[0]) : [];
     const updatedRules = rules.map(rule => ({
@@ -74,6 +98,24 @@ const Index = () => {
       columns: rule.columns.length === 0 ? columns : rule.columns
     }));
     setRules(updatedRules);
+  };
+
+  const runValidation = () => {
+    const columns = currentData.length > 0 ? Object.keys(currentData[0]) : [];
+    const columnsToValidate: Record<string, string> = {};
+    
+    Object.keys(taxonomy).forEach(taxonomyKey => {
+      const matchingColumn = columns.find(col => 
+        col.toLowerCase().includes(taxonomyKey.toLowerCase()) ||
+        taxonomyKey.toLowerCase().includes(col.toLowerCase())
+      );
+      if (matchingColumn) {
+        columnsToValidate[matchingColumn] = taxonomyKey;
+      }
+    });
+
+    const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
+    setValidationIssues(issues);
   };
 
   const handleDataChange = (newData: DataRow[], change?: ChangeLog) => {
@@ -87,6 +129,7 @@ const Index = () => {
     const { cleanedData, changes: newChanges } = applyCleanupRules(currentData, rules);
     setCurrentData(cleanedData);
     setChanges(prev => [...prev, ...newChanges]);
+    runValidation();
     toast({
       title: 'Cleanup completed',
       description: `${newChanges.length} changes applied`,
@@ -96,10 +139,24 @@ const Index = () => {
   const handleReset = () => {
     setCurrentData(originalData);
     setChanges([]);
+    setValidationIssues([]);
+    runValidation();
     toast({
       title: 'Data reset',
       description: 'All changes have been reverted',
     });
+  };
+
+  const handleAddToTaxonomy = (taxonomyKey: string, value: string) => {
+    const updatedTaxonomy = {
+      ...taxonomy,
+      [taxonomyKey]: [...(taxonomy[taxonomyKey] || []), value]
+    };
+    setTaxonomy(updatedTaxonomy);
+    
+    setValidationIssues(prev => 
+      prev.filter(issue => !(issue.taxonomyKey === taxonomyKey && issue.value === value))
+    );
   };
 
   const handleExportData = () => {
@@ -163,17 +220,49 @@ const Index = () => {
             </div>
           </div>
         ) : (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <DataTable data={currentData} onDataChange={handleDataChange} />
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid w-full max-w-md grid-cols-4">
+              <TabsTrigger value="data">Data</TabsTrigger>
+              <TabsTrigger value="taxonomy">Taxonomy</TabsTrigger>
+              <TabsTrigger value="issues">Issues</TabsTrigger>
+              <TabsTrigger value="dashboard">
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Dashboard
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="data" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <DataTable data={currentData} onDataChange={handleDataChange} />
+                </div>
+                <div className="space-y-6">
+                  <CleanupRules rules={rules} onRulesChange={setRules} />
+                </div>
               </div>
-              <div className="space-y-6">
-                <CleanupRules rules={rules} onRulesChange={setRules} />
-              </div>
-            </div>
-            <ChangeLogView changes={changes} />
-          </div>
+              <ChangeLogView changes={changes} />
+            </TabsContent>
+
+            <TabsContent value="taxonomy" className="space-y-6">
+              <TaxonomyManager taxonomy={taxonomy} onTaxonomyChange={setTaxonomy} />
+            </TabsContent>
+
+            <TabsContent value="issues" className="space-y-6">
+              <ValidationIssues 
+                issues={validationIssues} 
+                taxonomy={taxonomy}
+                onAddToTaxonomy={handleAddToTaxonomy}
+              />
+            </TabsContent>
+
+            <TabsContent value="dashboard" className="space-y-6">
+              <Dashboard 
+                data={currentData}
+                changes={changes}
+                issues={validationIssues}
+              />
+            </TabsContent>
+          </Tabs>
         )}
       </main>
     </div>
