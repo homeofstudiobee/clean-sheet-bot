@@ -7,9 +7,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 interface DataTableProps {
   data: DataRow[];
   onDataChange: (newData: DataRow[], change?: ChangeLog) => void;
+  readOnly?: boolean;
 }
 
-export const DataTable = ({ data, onDataChange }: DataTableProps) => {
+export const DataTable = ({ data, onDataChange, readOnly = false }: DataTableProps) => {
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
 
   if (data.length === 0) return null;
@@ -68,8 +69,8 @@ export const DataTable = ({ data, onDataChange }: DataTableProps) => {
                   return (
                     <TableCell
                       key={`${rowIndex}-${col}`}
-                      onDoubleClick={() => setEditingCell({ row: rowIndex, col })}
-                      className="cursor-pointer"
+                      onDoubleClick={() => !readOnly && setEditingCell({ row: rowIndex, col })}
+                      className={readOnly ? '' : 'cursor-pointer'}
                     >
                       {isEditing ? (
                         <Input
@@ -97,7 +98,7 @@ export const DataTable = ({ data, onDataChange }: DataTableProps) => {
         </Table>
       </ScrollArea>
       <div className="p-4 border-t bg-muted/50 text-sm text-muted-foreground">
-        <p>Double-click any cell to edit • {data.length} rows total</p>
+        <p>{readOnly ? 'Read-only preview' : 'Double-click any cell to edit'} • {data.length} rows total</p>
       </div>
     </div>
   );
