@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { FileUpload } from '@/components/FileUpload';
 import { DataTable } from '@/components/DataTable';
 import { TaxonomyUploader } from '@/components/TaxonomyUploader';
@@ -15,7 +15,9 @@ import { TaxonomyDefinition, ValidationConfig } from '@/types/taxonomyConfig';
 import { processData, ProcessingResult } from '@/utils/dataProcessor';
 import { createDefaultValidationConfig, exportTaxonomyToCSV } from '@/utils/taxonomyLoader';
 import { exportToExcel } from '@/utils/fileHandlers';
-import { Upload, Play, Download, Database } from 'lucide-react';
+import { saveTaxonomies, loadTaxonomies, clearTaxonomies, getCacheTimestamp } from '@/utils/taxonomyStorage';
+import { Upload, Play, Download, Database, Trash2, FileCheck } from 'lucide-react';
+import yaml from 'js-yaml';
 
 export const DataCleaningTool: React.FC = () => {
   const [rawData, setRawData] = useState<DataRow[]>([]);
@@ -29,23 +31,50 @@ export const DataCleaningTool: React.FC = () => {
   const [activeTab, setActiveTab] = useState('upload');
   const [validationRules, setValidationRules] = useState<any>(null);
   const [dataFilename, setDataFilename] = useState<string>('');
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
 
-  // Load taxonomies from localStorage
+  // Auto-load built-in rules on mount
   useEffect(() => {
-    const saved = localStorage.getItem('taxonomies');
-    if (saved) {
+    const loadBuiltInRules = async () => {
       try {
-        setTaxonomies(JSON.parse(saved));
+        const response = await fetch('/validation_rules.yaml');
+        if (response.ok) {
+          const text = await response.text();
+          const rules = yaml.load(text);
+          setValidationRules(rules);
+          toast({
+            title: 'Rules auto-loaded',
+            description: 'Built-in validation rules loaded successfully'
+          });
+        }
       } catch (error) {
-        console.error('Error loading taxonomies:', error);
+        console.error('Failed to auto-load rules:', error);
       }
+    };
+
+    loadBuiltInRules();
+  }, []);
+
+  // Auto-restore taxonomies from cache on mount
+  useEffect(() => {
+    const cached = loadTaxonomies();
+    if (cached) {
+      setTaxonomies(cached);
+      const timestamp = getCacheTimestamp();
+      setCacheTimestamp(timestamp);
+      const taxonomyCount = Object.keys(cached).length;
+      toast({
+        title: 'Taxonomies restored',
+        description: `${taxonomyCount} taxonomies loaded from cache`
+      });
     }
   }, []);
 
-  // Save taxonomies to localStorage
+  // Save taxonomies to cache whenever they change
   useEffect(() => {
     if (Object.keys(taxonomies).length > 0) {
-      localStorage.setItem('taxonomies', JSON.stringify(taxonomies));
+      saveTaxonomies(taxonomies);
+      setCacheTimestamp(Date.now());
     }
   }, [taxonomies]);
 
@@ -67,6 +96,16 @@ export const DataCleaningTool: React.FC = () => {
     setTaxonomies({
       ...taxonomies,
       [taxonomy.key]: taxonomy
+    });
+  };
+
+  const handleClearTaxonomies = () => {
+    clearTaxonomies();
+    setTaxonomies({});
+    setCacheTimestamp(null);
+    toast({
+      title: 'Taxonomies cleared',
+      description: 'All cached taxonomies have been removed'
     });
   };
 
@@ -277,14 +316,44 @@ export const DataCleaningTool: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="taxonomies" className="space-y-6">
-          <TaxonomyUploader
-            onTaxonomyLoaded={handleTaxonomyLoaded}
-            existingTaxonomies={taxonomies}
-          />
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Taxonomy Management</CardTitle>
+                  <CardDescription>
+                    {taxonomyCount}/6 taxonomies loaded
+                    {cacheTimestamp && (
+                      <span className="ml-2 text-xs">
+                        <FileCheck className="inline h-3 w-3 mr-1" />
+                        Auto-restored ({new Date(cacheTimestamp).toLocaleString()})
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+                {taxonomyCount > 0 && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleClearTaxonomies}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear All
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <TaxonomyUploader
+                onTaxonomyLoaded={handleTaxonomyLoaded}
+                existingTaxonomies={taxonomies}
+              />
+            </CardContent>
+          </Card>
 
           {Object.keys(taxonomies).length > 0 && (
             <div className="space-y-4">
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 {Object.keys(taxonomies).map(key => (
                   <Button
                     key={key}

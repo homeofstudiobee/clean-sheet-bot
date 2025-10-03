@@ -1,0 +1,65 @@
+# Default Validation Rules
+# This file is auto-loaded on app initialization
+
+defaults:
+  Plan Status: "Active"
+  Objective: "Brand Awareness"
+  Region: "EMEA"
+
+temporary_fills:
+  # These override defaults if still blank
+  Campaign Name: "_TBD"
+  Vendor: "_TBD"
+
+allowed_objectives:
+  - Brand Awareness
+  - Consideration
+  - Conversion
+  - Retention
+  - Traffic
+  - Engagement
+  - Other
+
+brand_mapping:
+  precedence:
+    - [market, raw_brand, raw_variant]
+    - [market, raw_brand]
+    - [raw_brand, raw_variant]
+    - [raw_brand]
+  outputs:
+    - brand_clean
+    - brand_type
+    - variant
+    - category
+    - subcategory
+
+campaign_mapping:
+  precedence:
+    - [market, brand, raw_campaign, raw_plan_name]
+    - [market, brand, raw_campaign]
+    - [market, raw_campaign]
+    - [raw_campaign]
+  outputs:
+    - campaign_clean
+    - campaign_type
+    - campaign_subtype
+
+fx_rules:
+  compute_pairs:
+    eur:
+      - ["Total Cost to Client (Local)", "Planned_Spend_EUR"]
+      - ["Total Cost to Client Actual (Local)", "Actualised_Spend_EUR"]
+      - ["Net Media Cost (Local)", "Net_Media_EUR"]
+    dkk:
+      - ["Total Cost to Client (Local)", "Planned_Spend_DKK"]
+      - ["Total Cost to Client Actual (Local)", "Actualised_Spend_DKK"]
+  audit_global_vs_eur:
+    enabled: true
+    tolerance_ratio: 0.02
+
+cbht_rules:
+  join_keys_order:
+    - [Brand_clean, Market, FX_Year]
+    - [Brand_clean, Market]
+    - [Brand, Market, FX_Year]
+    - [Brand, Market]

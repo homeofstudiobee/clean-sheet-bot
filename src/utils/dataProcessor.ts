@@ -4,20 +4,17 @@ import { mapBrand, generateBrandTodoEntry } from './brandMapping';
 import { mapCampaign, generateCampaignTodoEntry } from './campaignMapping';
 import { lookupCBHT, generateCBHTTodoEntry } from './cbhtMapping';
 import { applyDefaults, validateObjective, fillMissingDates, backfillActuals, extractFxYearFromFilename } from './dataCleanup';
+import { normalizeHeaders, normalizeCurrency, extractYearFromFilename } from './headerNormalization';
 
 export interface ProcessingResult {
   cleanedData: DataRow[];
   exceptions: Array<{
-    market: string;
-    region: string;
-    planId: string;
-    planName: string;
+    rowNumber: number;
     field: string;
     issueType: string;
-    currentValue: string;
-    suggestedValue: string;
-    priority: string;
-    owner: string;
+    originalValue: string;
+    newValue: string;
+    notes: string;
   }>;
   todoLists: {
     brands: Array<Record<string, any>>;
@@ -58,9 +55,10 @@ export const processData = (
   const cbhtTax = taxonomies['cbht'];
 
   rawData.forEach((row, rowIndex) => {
-    let cleanedRow = { ...row };
+    // 0. Normalize headers and trim all values
+    let cleanedRow = normalizeHeaders(row);
 
-    // 0. Apply defaults and temporary fills from YAML rules
+    // 1. Apply defaults and temporary fills from YAML rules
     if (validationRules) {
       cleanedRow = applyDefaults(
         cleanedRow,
@@ -70,7 +68,12 @@ export const processData = (
 
       // Extract FX_Year from filename if not present
       if (filename && !cleanedRow.FX_Year) {
-        cleanedRow.FX_Year = extractFxYearFromFilename(filename);
+        cleanedRow.FX_Year = extractYearFromFilename(filename);
+      }
+
+      // Normalize currency
+      if (cleanedRow.Currency) {
+        cleanedRow.Currency = normalizeCurrency(String(cleanedRow.Currency));
       }
 
       // Fill missing dates
@@ -89,16 +92,12 @@ export const processData = (
 
         if (!objectiveValidation.isValid) {
           exceptions.push({
-            market: String(row.Market || ''),
-            region: String(row.Region || ''),
-            planId: String(row['Plan ID'] || ''),
-            planName: String(row['Plan Name'] || ''),
+            rowNumber: rowIndex + 2, // +2 because Excel is 1-indexed and has header row
             field: 'Objective',
             issueType: 'invalid_objective',
-            currentValue: String(row.Objective || ''),
-            suggestedValue: objectiveValidation.value,
-            priority: 'P3',
-            owner: 'Analytics'
+            originalValue: String(row.Objective || ''),
+            newValue: objectiveValidation.value,
+            notes: `Market: ${row.Market || ''}, Plan: ${row['Plan Name'] || row.PlanId || ''}`
           });
         }
 
@@ -113,16 +112,12 @@ export const processData = (
         Object.assign(cleanedRow, brandResult.outputs);
       } else {
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'Brand',
           issueType: 'brand_unmapped',
-          currentValue: String(row.Brand || ''),
-          suggestedValue: '',
-          priority: 'P2',
-          owner: 'Analytics'
+          originalValue: String(row.Brand || ''),
+          newValue: '',
+          notes: `Market: ${row.Market || ''}, Variant: ${row.Variant || ''}`
         });
         todoLists.brands.push(generateBrandTodoEntry(row, rowIndex));
       }
@@ -135,16 +130,12 @@ export const processData = (
         Object.assign(cleanedRow, campaignResult.outputs);
       } else {
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'Campaign Name',
           issueType: 'campaign_unmapped',
-          currentValue: String(row['Campaign Name'] || ''),
-          suggestedValue: '',
-          priority: 'P3',
-          owner: 'Analytics'
+          originalValue: String(row['Campaign Name'] || ''),
+          newValue: '',
+          notes: `Market: ${row.Market || ''}, Brand: ${row.Brand || ''}, Plan: ${row['Plan Name'] || ''}`
         });
         todoLists.campaigns.push(generateCampaignTodoEntry(row, rowIndex));
       }
@@ -162,16 +153,12 @@ export const processData = (
       } else {
         cleanedRow.Vendor_clean = '_Placeholder';
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'Vendor',
           issueType: 'vendor_unmapped',
-          currentValue: String(row.Vendor || ''),
-          suggestedValue: '_Placeholder',
-          priority: 'P2',
-          owner: 'Partnerships'
+          originalValue: String(row.Vendor || ''),
+          newValue: '_Placeholder',
+          notes: `Market: ${row.Market || ''}`
         });
         todoLists.vendors.push({
           rowIndex,
@@ -196,21 +183,17 @@ export const processData = (
         cleanedRow.ExComChannel = channelMatch.ExComChannel || '';
       } else {
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'Channel',
           issueType: 'channel_unmapped',
-          currentValue: `${row.Channel || ''}|${row['Sub-Channel'] || ''}`,
-          suggestedValue: '',
-          priority: 'P3',
-          owner: 'Analytics'
+          originalValue: `${row.Channel || ''}|${row.SubChannel || row['Sub-Channel'] || ''}`,
+          newValue: '',
+          notes: `Market: ${row.Market || ''}`
         });
         todoLists.channels.push({
           rowIndex,
           channel: row.Channel || '',
-          subChannel: row['Sub-Channel'] || '',
+          subChannel: row.SubChannel || row['Sub-Channel'] || '',
           channelFinanceGroup: '',
           exComChannel: ''
         });
@@ -260,16 +243,12 @@ export const processData = (
               const eurVal = parseFloat(String(cleanedRow[eurCol]));
               if (globalVal > 0 && Math.abs(globalVal - eurVal) / globalVal > tolerance) {
                 exceptions.push({
-                  market: String(row.Market || ''),
-                  region: String(row.Region || ''),
-                  planId: String(row['Plan ID'] || ''),
-                  planName: String(row['Plan Name'] || ''),
+                  rowNumber: rowIndex + 2,
                   field: eurCol,
                   issueType: 'eur_mismatch',
-                  currentValue: String(globalVal),
-                  suggestedValue: String(eurVal),
-                  priority: 'P3',
-                  owner: 'Analytics'
+                  originalValue: String(globalVal),
+                  newValue: String(eurVal),
+                  notes: `Global vs EUR mismatch exceeds ${(tolerance * 100).toFixed(0)}% tolerance`
                 });
               }
             }
@@ -277,16 +256,12 @@ export const processData = (
         }
       } else {
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'FX',
           issueType: 'fx_missing',
-          currentValue: `${row.Market || ''}/${row.Currency || ''}/${row.FX_Year || ''}`,
-          suggestedValue: '',
-          priority: 'P1',
-          owner: 'Analytics'
+          originalValue: `${row.Market || ''}/${cleanedRow.Currency || row.Currency || ''}/${cleanedRow.FX_Year || ''}`,
+          newValue: '',
+          notes: 'No FX rate found for this Market/Currency/Year combination'
         });
       }
     }
@@ -299,16 +274,12 @@ export const processData = (
         cleanedRow.CBHT_Study = cbhtResult.cbhtData.cbht_study || '';
       } else {
         exceptions.push({
-          market: String(row.Market || ''),
-          region: String(row.Region || ''),
-          planId: String(row['Plan ID'] || ''),
-          planName: String(row['Plan Name'] || ''),
+          rowNumber: rowIndex + 2,
           field: 'CBHT',
           issueType: 'cbht_missing',
-          currentValue: String(cleanedRow.Brand_clean || row.Brand || ''),
-          suggestedValue: '',
-          priority: 'P3',
-          owner: 'Analytics'
+          originalValue: String(cleanedRow.Brand_clean || row.Brand || ''),
+          newValue: '',
+          notes: `Market: ${row.Market || ''}, FX_Year: ${cleanedRow.FX_Year || ''}`
         });
         todoLists.cbht.push(generateCBHTTodoEntry(cleanedRow, rowIndex));
       }
