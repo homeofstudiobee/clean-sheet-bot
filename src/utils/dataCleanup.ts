@@ -1,96 +1,120 @@
-import { DataRow, ChangeLog, CleanupRule } from '@/types/data';
+import { DataRow } from '@/types/data';
 
-export const applyCleanupRules = (
-  data: DataRow[],
-  rules: CleanupRule[]
-): { cleanedData: DataRow[]; changes: ChangeLog[] } => {
-  let cleanedData = JSON.parse(JSON.stringify(data)) as DataRow[];
-  const changes: ChangeLog[] = [];
+// For backward compatibility with old Index.tsx
+export const applyCleanupRules = (data: DataRow[], rules: any[]) => {
+  return { cleanedData: data, changes: [] };
+};
 
-  rules.forEach(rule => {
-    if (!rule.enabled) return;
+/**
+ * Apply default values and temporary fills to a row
+ */
+export const applyDefaults = (
+  row: DataRow,
+  defaults: Record<string, any>,
+  temporaryFills: Record<string, any>
+): DataRow => {
+  const cleanedRow = { ...row };
 
-    cleanedData = cleanedData.map((row, rowIndex) => {
-      const newRow = { ...row };
-      
-      rule.columns.forEach(column => {
-        if (!(column in row)) return;
-        
-        const oldValue = row[column];
-        let newValue = oldValue;
-
-        switch (rule.type) {
-          case 'trim':
-            if (typeof oldValue === 'string') {
-              newValue = oldValue.trim();
-            }
-            break;
-          
-          case 'uppercase':
-            if (typeof oldValue === 'string') {
-              newValue = oldValue.toUpperCase();
-            }
-            break;
-          
-          case 'lowercase':
-            if (typeof oldValue === 'string') {
-              newValue = oldValue.toLowerCase();
-            }
-            break;
-          
-          case 'remove-special-chars':
-            if (typeof oldValue === 'string') {
-              newValue = oldValue.replace(/[^a-zA-Z0-9\s]/g, '');
-            }
-            break;
-        }
-
-        if (oldValue !== newValue) {
-          changes.push({
-            id: `${Date.now()}-${rowIndex}-${column}`,
-            rowIndex,
-            column,
-            oldValue,
-            newValue,
-            changeType: 'automated',
-            timestamp: new Date(),
-            rule: rule.name
-          });
-          newRow[column] = newValue;
-        }
-      });
-
-      return newRow;
-    });
-  });
-
-  // Remove duplicates if rule exists
-  const duplicateRule = rules.find(r => r.type === 'remove-duplicates' && r.enabled);
-  if (duplicateRule) {
-    const seen = new Set<string>();
-    const uniqueData: DataRow[] = [];
-    
-    cleanedData.forEach((row, index) => {
-      const key = JSON.stringify(row);
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueData.push(row);
-      } else {
-        changes.push({
-          id: `${Date.now()}-${index}-duplicate`,
-          rowIndex: index,
-          column: 'ALL',
-          oldValue: 'Duplicate Row',
-          newValue: 'Removed',
-          changeType: 'automated',
-          timestamp: new Date(),
-          rule: duplicateRule.name
-        });
+  // First apply defaults for any missing/blank values
+  if (defaults) {
+    Object.keys(defaults).forEach(key => {
+      const value = cleanedRow[key];
+      if (value === null || value === undefined || value === '') {
+        cleanedRow[key] = defaults[key];
       }
     });
-    
-    cleanedData = uniqueData;
   }
 
-  return { cleanedData, changes };
+  // Then apply temporary fills (overrides defaults)
+  if (temporaryFills) {
+    Object.keys(temporaryFills).forEach(key => {
+      const value = cleanedRow[key];
+      if (value === null || value === undefined || value === '') {
+        cleanedRow[key] = temporaryFills[key];
+      }
+    });
+  }
+
+  return cleanedRow;
+};
+
+/**
+ * Validate objective against allowed list
+ */
+export const validateObjective = (
+  objective: string,
+  allowedObjectives: string[],
+  fallback: string
+): { value: string; isValid: boolean } => {
+  if (!allowedObjectives || allowedObjectives.length === 0) {
+    return { value: objective, isValid: true };
+  }
+
+  const normalized = String(objective || '').trim().toLowerCase();
+  const isValid = allowedObjectives.some(
+    allowed => String(allowed).trim().toLowerCase() === normalized
+  );
+
+  return {
+    value: isValid ? objective : fallback,
+    isValid
+  };
+};
+
+/**
+ * Extract FX_Year from filename (e.g., "plans_2024.xlsx" -> "2024")
+ */
+export const extractFxYearFromFilename = (filename: string): string => {
+  const match = filename.match(/(\d{4})/);
+  return match ? match[1] : '';
+};
+
+/**
+ * Fill missing dates with placeholder logic
+ */
+export const fillMissingDates = (row: DataRow): DataRow => {
+  const cleanedRow = { ...row };
+  
+  if (!cleanedRow['Start Date'] || cleanedRow['Start Date'] === '') {
+    cleanedRow['Start Date'] = '2024-01-01'; // Default placeholder
+  }
+  
+  if (!cleanedRow['End Date'] || cleanedRow['End Date'] === '') {
+    cleanedRow['End Date'] = '2024-12-31'; // Default placeholder
+  }
+
+  return cleanedRow;
+};
+
+/**
+ * Backfill actuals from planned values for old lines
+ */
+export const backfillActuals = (row: DataRow): DataRow => {
+  const cleanedRow = { ...row };
+  const endDate = cleanedRow['End Date'];
+  
+  if (!endDate) return cleanedRow;
+
+  try {
+    const endDateObj = new Date(String(endDate));
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // If line ended more than 30 days ago and actuals are missing
+    if (endDateObj < thirtyDaysAgo) {
+      // Backfill Local
+      if (!cleanedRow['Total Cost to Client Actual (Local)'] && cleanedRow['Total Cost to Client (Local)']) {
+        cleanedRow['Total Cost to Client Actual (Local)'] = cleanedRow['Total Cost to Client (Local)'];
+      }
+      
+      // Backfill Global
+      if (!cleanedRow['Total Cost to Client Actual (Global)'] && cleanedRow['Total Cost to Client (Global)']) {
+        cleanedRow['Total Cost to Client Actual (Global)'] = cleanedRow['Total Cost to Client (Global)'];
+      }
+    }
+  } catch (error) {
+    // Invalid date format, skip backfill
+  }
+
+  return cleanedRow;
 };

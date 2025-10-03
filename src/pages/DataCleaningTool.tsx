@@ -8,6 +8,7 @@ import { TaxonomyUploader } from '@/components/TaxonomyUploader';
 import { TaxonomyEditor } from '@/components/TaxonomyEditor';
 import { UnmappedItemsReview } from '@/components/UnmappedItemsReview';
 import { ExceptionsReport } from '@/components/ExceptionsReport';
+import { RulesUploader } from '@/components/RulesUploader';
 import { toast } from '@/hooks/use-toast';
 import { DataRow } from '@/types/data';
 import { TaxonomyDefinition, ValidationConfig } from '@/types/taxonomyConfig';
@@ -26,6 +27,8 @@ export const DataCleaningTool: React.FC = () => {
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const [selectedTaxonomy, setSelectedTaxonomy] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('upload');
+  const [validationRules, setValidationRules] = useState<any>(null);
+  const [dataFilename, setDataFilename] = useState<string>('');
 
   // Load taxonomies from localStorage
   useEffect(() => {
@@ -46,13 +49,18 @@ export const DataCleaningTool: React.FC = () => {
     }
   }, [taxonomies]);
 
-  const handleDataLoaded = (data: DataRow[]) => {
+  const handleDataLoaded = (data: DataRow[], filename?: string) => {
     setRawData(data);
+    setDataFilename(filename || '');
     toast({
       title: 'Data loaded',
       description: `${data.length} rows loaded successfully.`
     });
     setActiveTab('process');
+  };
+
+  const handleRulesLoaded = (rules: any) => {
+    setValidationRules(rules);
   };
 
   const handleTaxonomyLoaded = (taxonomy: TaxonomyDefinition) => {
@@ -80,7 +88,7 @@ export const DataCleaningTool: React.FC = () => {
     }
 
     try {
-      const result = processData(rawData, taxonomies, validationConfig);
+      const result = processData(rawData, taxonomies, validationConfig, validationRules, dataFilename);
       setProcessingResult(result);
       setCleanedData(result.cleanedData);
       
@@ -156,6 +164,8 @@ export const DataCleaningTool: React.FC = () => {
   const taxonomyCount = Object.keys(taxonomies).length;
   const hasData = rawData.length > 0;
   const hasProcessed = processingResult !== null;
+  const hasRules = validationRules !== null;
+  const canProcess = hasData && hasRules && taxonomyCount === 6;
 
   return (
     <div className="container mx-auto py-8 space-y-6">
@@ -169,7 +179,7 @@ export const DataCleaningTool: React.FC = () => {
         <div className="flex gap-2">
           {hasData && (
             <>
-              <Button onClick={handleRunProcessing} variant="default">
+              <Button onClick={handleRunProcessing} variant="default" disabled={!canProcess}>
                 <Play className="h-4 w-4 mr-2" />
                 Run Processing
               </Button>
@@ -184,13 +194,25 @@ export const DataCleaningTool: React.FC = () => {
         </div>
       </header>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Taxonomies Loaded</CardTitle>
+            <CardTitle className="text-sm font-medium">Rules</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{taxonomyCount} / 6</div>
+            <div className={`text-2xl font-bold ${hasRules ? 'text-green-600' : 'text-muted-foreground'}`}>
+              {hasRules ? 'Loaded' : 'Not loaded'}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Taxonomies</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${taxonomyCount === 6 ? 'text-green-600' : 'text-muted-foreground'}`}>
+              {taxonomyCount} / 6
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -236,6 +258,7 @@ export const DataCleaningTool: React.FC = () => {
         </TabsList>
 
         <TabsContent value="upload" className="space-y-6">
+          <RulesUploader onRulesLoaded={handleRulesLoaded} rulesLoaded={hasRules} />
           <FileUpload onDataLoaded={handleDataLoaded} />
           {rawData.length > 0 && (
             <Card>
@@ -293,31 +316,51 @@ export const DataCleaningTool: React.FC = () => {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h3 className="font-semibold mb-2">Taxonomies Required</h3>
-                  <ul className="space-y-1 text-sm">
+                  <h3 className="font-semibold mb-2">Requirements</h3>
+                  <ul className="space-y-2 text-sm">
+                    <li className="flex items-center gap-2">
+                      <span className={hasRules ? 'text-green-600' : 'text-muted-foreground'}>
+                        {hasRules ? '✓' : '○'}
+                      </span>
+                      Validation Rules (YAML)
+                    </li>
                     {['brands', 'campaigns', 'vendors', 'channels', 'fx_rates', 'cbht'].map(key => (
                       <li key={key} className="flex items-center gap-2">
                         <span className={taxonomies[key] ? 'text-green-600' : 'text-muted-foreground'}>
                           {taxonomies[key] ? '✓' : '○'}
                         </span>
-                        {key}
+                        {key}.csv
                       </li>
                     ))}
+                    <li className="flex items-center gap-2">
+                      <span className={hasData ? 'text-green-600' : 'text-muted-foreground'}>
+                        {hasData ? '✓' : '○'}
+                      </span>
+                      Data file uploaded
+                    </li>
                   </ul>
                 </div>
                 <div>
                   <h3 className="font-semibold mb-2">Processing Steps</h3>
                   <ol className="space-y-1 text-sm list-decimal list-inside">
+                    <li>Apply defaults & temporary fills</li>
+                    <li>Validate objectives</li>
                     <li>Brand hierarchy mapping</li>
                     <li>Campaign classification</li>
                     <li>Vendor mapping</li>
                     <li>Channel taxonomy</li>
                     <li>FX conversion & audit</li>
                     <li>CBHT join</li>
+                    <li>Date & actuals backfill</li>
                   </ol>
                 </div>
               </div>
-              <Button onClick={handleRunProcessing} className="w-full" size="lg">
+              {!canProcess && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                  Please upload validation rules, all 6 taxonomies, and data file before processing.
+                </div>
+              )}
+              <Button onClick={handleRunProcessing} className="w-full" size="lg" disabled={!canProcess}>
                 <Play className="h-5 w-5 mr-2" />
                 Run Full Processing Pipeline
               </Button>

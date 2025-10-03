@@ -3,6 +3,7 @@ import { TaxonomyDefinition, ValidationConfig } from '@/types/taxonomyConfig';
 import { mapBrand, generateBrandTodoEntry } from './brandMapping';
 import { mapCampaign, generateCampaignTodoEntry } from './campaignMapping';
 import { lookupCBHT, generateCBHTTodoEntry } from './cbhtMapping';
+import { applyDefaults, validateObjective, fillMissingDates, backfillActuals, extractFxYearFromFilename } from './dataCleanup';
 
 export interface ProcessingResult {
   cleanedData: DataRow[];
@@ -34,7 +35,9 @@ export interface ProcessingResult {
 export const processData = (
   rawData: DataRow[],
   taxonomies: Record<string, TaxonomyDefinition>,
-  validationConfig: ValidationConfig
+  validationConfig: ValidationConfig,
+  validationRules?: any,
+  filename?: string
 ): ProcessingResult => {
   const cleanedData: DataRow[] = [];
   const exceptions: ProcessingResult['exceptions'] = [];
@@ -55,7 +58,53 @@ export const processData = (
   const cbhtTax = taxonomies['cbht'];
 
   rawData.forEach((row, rowIndex) => {
-    const cleanedRow = { ...row };
+    let cleanedRow = { ...row };
+
+    // 0. Apply defaults and temporary fills from YAML rules
+    if (validationRules) {
+      cleanedRow = applyDefaults(
+        cleanedRow,
+        validationRules.defaults,
+        validationRules.temporary_fills
+      );
+
+      // Extract FX_Year from filename if not present
+      if (filename && !cleanedRow.FX_Year) {
+        cleanedRow.FX_Year = extractFxYearFromFilename(filename);
+      }
+
+      // Fill missing dates
+      cleanedRow = fillMissingDates(cleanedRow);
+
+      // Backfill actuals for old lines
+      cleanedRow = backfillActuals(cleanedRow);
+
+      // Validate Objective
+      if (validationRules.allowed_objectives) {
+        const objectiveValidation = validateObjective(
+          String(cleanedRow.Objective || ''),
+          validationRules.allowed_objectives,
+          validationRules.defaults?.Objective || 'Other'
+        );
+
+        if (!objectiveValidation.isValid) {
+          exceptions.push({
+            market: String(row.Market || ''),
+            region: String(row.Region || ''),
+            planId: String(row['Plan ID'] || ''),
+            planName: String(row['Plan Name'] || ''),
+            field: 'Objective',
+            issueType: 'invalid_objective',
+            currentValue: String(row.Objective || ''),
+            suggestedValue: objectiveValidation.value,
+            priority: 'P3',
+            owner: 'Analytics'
+          });
+        }
+
+        cleanedRow.Objective = objectiveValidation.value;
+      }
+    }
 
     // 1. Brand Mapping
     if (brandsTax && validationConfig.brand_mapping) {

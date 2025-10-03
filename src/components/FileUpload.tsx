@@ -5,7 +5,7 @@ import { importFile } from '@/utils/fileHandlers';
 import { DataRow } from '@/types/data';
 
 interface FileUploadProps {
-  onDataLoaded: (data: DataRow[]) => void;
+  onDataLoaded: (data: DataRow[], filename?: string) => void;
 }
 
 export const FileUpload = ({ onDataLoaded }: FileUploadProps) => {
@@ -24,7 +24,7 @@ export const FileUpload = ({ onDataLoaded }: FileUploadProps) => {
 
       try {
         const data = await importFile(file);
-        onDataLoaded(data);
+        onDataLoaded(data, file.name);
         toast({
           title: 'File loaded successfully',
           description: `${data.length} rows imported`,
