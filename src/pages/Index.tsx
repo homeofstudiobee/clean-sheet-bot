@@ -47,18 +47,25 @@ const Index = () => {
   };
 
   const runValidation = () => {
-    const columns = currentData.length > 0 ? Object.keys(currentData[0]) : [];
-    const columnsToValidate: Record<string, string> = {};
+    // inside runValidation()
+      const columns = currentData.length ? Object.keys(currentData[0]) : [];
+      const normCols = new Map(columns.map(c => [normHeader(c), c]));
+  const synonyms: Record<string,string[]> = {
+    brand: ["brand","brand_name","brands"],
+    brand_line: ["brand_line","line","range","series"],
+    sku: ["sku","code","item_code","product_code"],
+    color_name: ["color_name","colour_name","name"],
+    };
+  const columnsToValidate: Record<string,string> = {};
+    Object.keys(taxonomy).forEach(taxKey => {
+    const nkey = normHeader(taxKey);
+    const cands = synonyms[nkey] || [nkey];
+    for (const cand of cands) {
+      const hit = normCols.get(cand);
+      if (hit) { columnsToValidate[hit] = taxKey; break; }
+    }
+});
 
-    Object.keys(taxonomy).forEach(taxonomyKey => {
-      const matchingColumn = columns.find(col =>
-        col.toLowerCase().includes(taxonomyKey.toLowerCase()) ||
-        taxonomyKey.toLowerCase().includes(col.toLowerCase())
-      );
-      if (matchingColumn) {
-        columnsToValidate[matchingColumn] = taxonomyKey;
-      }
-    });
 
     const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
     setValidationIssues(issues);
