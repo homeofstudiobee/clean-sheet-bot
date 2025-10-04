@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
 import { exportToExcel } from '@/utils/fileHandlers';
+import { diffRows, buildMarketTasks } from '@/utils/changeReport';
+import { exportWorkbook } from '@/utils/fileHandlers';
 import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
 import { runCleanup } from '@/lib/runCleanup';
@@ -115,6 +117,19 @@ const Index = () => {
     exportToExcel(currentData, `cleaned-data-${Date.now()}.xlsx`);
     toast({ title: 'Data exported', description: 'Cleaned data downloaded' });
   };
+
+  const handleExportActions = () => {
+  const cellChanges = diffRows(originalData, currentData);
+  const marketTasks = buildMarketTasks(validationIssues, currentData);
+  exportWorkbook(
+    {
+      "Cell_Changes": cellChanges,            // row, column, before, after
+      "Market_Tasks": marketTasks,            // taxonomyKey, value, occurrences, sample_rows
+    },
+    `actions-for-markets-${Date.now()}.xlsx`
+  );
+  toast({ title: 'Actions exported', description: 'Workbook with changes and tasks downloaded' });
+};
 
   return (
     <div className="min-h-screen bg-background">
