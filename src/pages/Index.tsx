@@ -4,6 +4,7 @@ import { DataTable } from '@/components/DataTable';
 import { ChangeLogView } from '@/components/ChangeLogView';
 import { TaxonomyManager } from '@/components/TaxonomyManager';
 import { ValidationIssues } from '@/components/ValidationIssues';
+import { normHeader } from '@/utils/normalize';
 import { Dashboard } from '@/components/Dashboard';
 import { DataRow, ChangeLog, TaxonomyData, ValidationIssue } from '@/types/data';
 import { Button } from '@/components/ui/button';
@@ -47,25 +48,25 @@ const Index = () => {
   };
 
   const runValidation = () => {
-    // inside runValidation()
-      const columns = currentData.length ? Object.keys(currentData[0]) : [];
-      const normCols = new Map(columns.map(c => [normHeader(c), c]));
-  const synonyms: Record<string,string[]> = {
-    brand: ["brand","brand_name","brands"],
-    brand_line: ["brand_line","line","range","series"],
-    sku: ["sku","code","item_code","product_code"],
-    color_name: ["color_name","colour_name","name"],
-    };
+  const columns = currentData.length ? Object.keys(currentData[0]) : [];
+  const normCols = new Map(columns.map(c => [normHeader(c), c]));
+  const synonyms: Record<string,string[]> = { /* … */ };
+
   const columnsToValidate: Record<string,string> = {};
-    Object.keys(taxonomy).forEach(taxKey => {
+  Object.keys(taxonomy).forEach(taxKey => {
     const nkey = normHeader(taxKey);
     const cands = synonyms[nkey] || [nkey];
     for (const cand of cands) {
       const hit = normCols.get(cand);
       if (hit) { columnsToValidate[hit] = taxKey; break; }
     }
-});
+  });
 
+  console.log('columnsToValidate', columnsToValidate); // <-- here
+
+  const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
+  setValidationIssues(issues);
+};
 
     const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
     setValidationIssues(issues);
