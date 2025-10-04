@@ -88,8 +88,6 @@ export const exportChangeLog = (changes: ChangeLog[], filename: string) => {
   XLSX.writeFile(workbook, filename);
 };
 
-import * as XLSX from "xlsx";
-
 export function exportWorkbook(sheets: Record<string, any[]>, filename: string) {
   const wb = XLSX.utils.book_new();
   for (const [name, rows] of Object.entries(sheets)) {

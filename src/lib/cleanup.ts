@@ -38,7 +38,7 @@ function applyRule(rows: Row[], rule: Rule): Row[] {
       });
     case "required": return rows; // validated later
     case "lowercase": return rows.map(r => ({ ...r, [rule.column]: r[rule.column]==null?null:String(r[rule.column]).toLowerCase() }));
-    case "uppercase": return rows.map(r => ({ ...r, [rule.column]: r[rule[column]==null?null:String(r[rule.column]).toUpperCase() ]}));
+    case "uppercase": return rows.map(r => ({ ...r, [rule.column]: r[rule.column]==null?null:String(r[rule.column]).toUpperCase() }));
     case "trim":      return rows.map(r => ({ ...r, [rule.column]: r[rule.column]==null?null:String(r[rule.column]).trim() }));
     case "coerceNumber": return rows.map(r => ({ ...r, [rule.column]: r[rule.column]==null?null:Number(String(r[rule.column]).replace(/[, ]/g,"")) }));
     case "dedupeBy": {
@@ -64,7 +64,7 @@ export function applyExceptions(rows: Row[], rules: Rules): Row[] {
 }
 
 export function validate(rows: Row[], rules: Rules): { rows: Row[]; errors: string[] } {
-  const required = rules.steps.filter(s => s.kind==="required") as Extract<Rule,{kind:"required">>[];
+  const required = rules.steps.filter(s => s.kind==="required") as Extract<Rule,{kind:"required"}>[];
   const errors: string[] = [];
   rows.forEach((r,i) => {
     for (const req of required) {
@@ -88,6 +88,6 @@ export function joinTaxonomy(rows: Row[], taxonomy: Row[], rules: Rules): Row[] 
 
 export function clean(rows: Row[], rules: Rules, taxonomy?: Row[]) {
   let out = rows; for (const step of rules.steps) out = applyRule(out, step);
-  out = applyExceptions(out, rules); if (taxonomy) out = joinTaxonomy(out, taxonomy);
+  out = applyExceptions(out, rules); if (taxonomy && rules.taxonomyJoin) out = joinTaxonomy(out, taxonomy, rules);
   const { errors } = validate(out, rules); return { rows: out, errors };
 }

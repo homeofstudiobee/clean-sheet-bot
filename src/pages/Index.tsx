@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
 import { diffRows, buildMarketTasks } from '@/utils/changeReport';
-+ import { exportToExcel, exportWorkbook } from '@/utils/fileHandlers';
+import { exportToExcel, exportWorkbook } from '@/utils/fileHandlers';
 import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
 import { runCleanup } from '@/lib/runCleanup';
@@ -70,25 +70,12 @@ const Index = () => {
   };
 
   const handleRunCleanup = () => {
-    // Built-in pipeline. Taxonomy stays for validation step.
     const { rows, errors } = runCleanup(currentData);
     setCurrentData(rows);
-    // Optionally record a single change entry so ChangeLog isn’t empty.
-    if (errors?.length) {
-      setChanges(prev => [
-        ...prev,
-        { id: String(Date.now()), description: `Cleanup applied with ${errors.length} validation warnings` } as ChangeLog,
-      ]);
-    } else {
-      setChanges(prev => [
-        ...prev,
-        { id: String(Date.now()), description: `Cleanup applied (${rows.length} rows)` } as ChangeLog,
-      ]);
-    }
     runValidation();
     toast({
       title: 'Cleanup completed',
-      description: `Rows processed: ${rows.length}`,
+      description: `Rows processed: ${rows.length}${errors?.length ? `, ${errors.length} warnings` : ''}`,
     });
   };
 
@@ -151,13 +138,13 @@ const Index = () => {
                   <Play className="h-4 w-4 mr-2" />
                   Run Cleanup
                 </Button>
-            <Button onClick={handleExportData} size="sm">
-+                  <Download className="h-4 w-4 mr-2" />
-+                  Export Data
-+                </Button>
-+                <Button onClick={handleExportActions} size="sm">
-+                  Export Actions
-+                </Button>
+                <Button onClick={handleExportData} size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Data
+                </Button>
+                <Button onClick={handleExportActions} size="sm">
+                  Export Actions
+                </Button>
               </div>
             )}
           </div>
