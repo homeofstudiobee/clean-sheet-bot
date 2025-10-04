@@ -153,9 +153,12 @@ const Index = () => {
                   Run Cleanup
                 </Button>
                 <Button onClick={handleExportData} size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Data
-                </Button>
++                  <Download className="h-4 w-4 mr-2" />
++                  Export Data
++                </Button>
++                <Button onClick={handleExportActions} size="sm">
++                  Export Actions
++                </Button>
               </div>
             )}
           </div>
