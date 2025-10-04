@@ -4,7 +4,6 @@ import { DataTable } from '@/components/DataTable';
 import { ChangeLogView } from '@/components/ChangeLogView';
 import { TaxonomyManager } from '@/components/TaxonomyManager';
 import { ValidationIssues } from '@/components/ValidationIssues';
-import { normHeader } from '@/utils/normalize';
 import { Dashboard } from '@/components/Dashboard';
 import { DataRow, ChangeLog, TaxonomyData, ValidationIssue } from '@/types/data';
 import { Button } from '@/components/ui/button';
@@ -15,6 +14,8 @@ import { exportToExcel, exportWorkbook } from '@/utils/fileHandlers';
 import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
 import { runCleanup } from '@/lib/runCleanup';
+import { normHeader } from '@/utils/normalize';
+import { coerceTaxonomy } from '@/utils/taxonomy';
 
 const Index = () => {
   const [originalData, setOriginalData] = useState<DataRow[]>([]);
@@ -48,25 +49,42 @@ const Index = () => {
   };
 
   const runValidation = () => {
-  const columns = currentData.length ? Object.keys(currentData[0]) : [];
-  const normCols = new Map(columns.map(c => [normHeader(c), c]));
-  const synonyms: Record<string,string[]> = { /* … */ };
+    const columns = currentData.length ? Object.keys(currentData[0]) : [];
+    const normCols = new Map(columns.map(c => [normHeader(c), c]));
 
-  const columnsToValidate: Record<string,string> = {};
-  Object.keys(taxonomy).forEach(taxKey => {
-    const nkey = normHeader(taxKey);
-    const cands = synonyms[nkey] || [nkey];
-    for (const cand of cands) {
-      const hit = normCols.get(cand);
-      if (hit) { columnsToValidate[hit] = taxKey; break; }
-    }
-  });
+    // synonym map to match dataset columns to taxonomy keys
+    const synonyms: Record<string, string[]> = {
+      brand: ['brand', 'brand_name', 'brands'],
+      brand_line: ['brand_line', 'line', 'range', 'series', 'sub_brand', 'subbrand'],
+      sku: ['sku', 'code', 'item_code', 'product_code', 'sku_code', 'sku id', 'id'],
+      color_name: ['color_name', 'colour_name', 'name', 'shade', 'shade_name'],
+      channel: ['channel', 'media_channel', 'media', 'placement_channel'],
+      vendor: ['vendor', 'supplier', 'partner', 'media_owner'],
+      campaign: ['campaign', 'campaign_name', 'flight', 'initiative'],
+      market: ['market', 'country', 'region', 'geo', 'location'],
+    };
 
-  console.log('columnsToValidate', columnsToValidate); // <-- here
+    // coerce uploaded taxonomy to { key: string[] }
+    const fixedTax = coerceTaxonomy(taxonomy);
 
-  const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
-  setValidationIssues(issues);
-};
+    const columnsToValidate: Record<string, string> = {};
+    Object.keys(fixedTax).forEach(taxKey => {
+      const nkey = normHeader(taxKey);
+      const candidates = synonyms[nkey] || [nkey];
+      for (const cand of candidates) {
+        const hit = normCols.get(cand);
+        if (hit) {
+          columnsToValidate[hit] = taxKey;
+          break;
+        }
+      }
+    });
+
+    console.log('columnsToValidate', columnsToValidate);
+
+    const issues = validateAgainstTaxonomy(currentData, fixedTax, columnsToValidate);
+    setValidationIssues(issues);
+  };
 
   const handleDataChange = (newData: DataRow[], change?: ChangeLog) => {
     setCurrentData(newData);
@@ -97,7 +115,6 @@ const Index = () => {
       [taxonomyKey]: [...(taxonomy[taxonomyKey] || []), value],
     };
     setTaxonomy(updatedTaxonomy);
-
     setValidationIssues(prev =>
       prev.filter(issue => !(issue.taxonomyKey === taxonomyKey && issue.value === value))
     );
@@ -109,17 +126,17 @@ const Index = () => {
   };
 
   const handleExportActions = () => {
-  const cellChanges = diffRows(originalData, currentData);
-  const marketTasks = buildMarketTasks(validationIssues, currentData);
-  exportWorkbook(
-    {
-      "Cell_Changes": cellChanges,            // row, column, before, after
-      "Market_Tasks": marketTasks,            // taxonomyKey, value, occurrences, sample_rows
-    },
-    `actions-for-markets-${Date.now()}.xlsx`
-  );
-  toast({ title: 'Actions exported', description: 'Workbook with changes and tasks downloaded' });
-};
+    const cellChanges = diffRows(originalData, currentData);
+    const marketTasks = buildMarketTasks(validationIssues, currentData);
+    exportWorkbook(
+      {
+        Cell_Changes: cellChanges,
+        Market_Tasks: marketTasks,
+      },
+      `actions-for-markets-${Date.now()}.xlsx`
+    );
+    toast({ title: 'Actions exported', description: 'Workbook with changes and tasks downloaded' });
+  };
 
   return (
     <div className="min-h-screen bg-background">
