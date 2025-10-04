@@ -9,9 +9,8 @@ import { DataRow, ChangeLog, TaxonomyData, ValidationIssue } from '@/types/data'
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
-import { exportToExcel } from '@/utils/fileHandlers';
 import { diffRows, buildMarketTasks } from '@/utils/changeReport';
-import { exportWorkbook } from '@/utils/fileHandlers';
++ import { exportToExcel, exportWorkbook } from '@/utils/fileHandlers';
 import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
 import { runCleanup } from '@/lib/runCleanup';
@@ -152,7 +151,7 @@ const Index = () => {
                   <Play className="h-4 w-4 mr-2" />
                   Run Cleanup
                 </Button>
-                <Button onClick={handleExportData} size="sm">
+            <Button onClick={handleExportData} size="sm">
 +                  <Download className="h-4 w-4 mr-2" />
 +                  Export Data
 +                </Button>
