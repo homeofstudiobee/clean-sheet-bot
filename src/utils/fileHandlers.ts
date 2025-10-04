@@ -87,3 +87,14 @@ export const exportChangeLog = (changes: ChangeLog[], filename: string) => {
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Change Log');
   XLSX.writeFile(workbook, filename);
 };
+
+import * as XLSX from "xlsx";
+
+export function exportWorkbook(sheets: Record<string, any[]>, filename: string) {
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(sheets)) {
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  }
+  XLSX.writeFile(wb, filename);
+}
