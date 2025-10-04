@@ -1,80 +1,32 @@
 import { useState, useEffect } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { DataTable } from '@/components/DataTable';
-import { CleanupRules } from '@/components/CleanupRules';
 import { ChangeLogView } from '@/components/ChangeLogView';
 import { TaxonomyManager } from '@/components/TaxonomyManager';
 import { ValidationIssues } from '@/components/ValidationIssues';
 import { Dashboard } from '@/components/Dashboard';
-import { DataRow, ChangeLog, CleanupRule, TaxonomyData, ValidationIssue } from '@/types/data';
+import { DataRow, ChangeLog, TaxonomyData, ValidationIssue } from '@/types/data';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
 import { exportToExcel } from '@/utils/fileHandlers';
-import { applyCleanupRules } from '@/utils/dataCleanup';
 import { validateAgainstTaxonomy } from '@/utils/validation';
 import { useToast } from '@/hooks/use-toast';
-
-const defaultRules: CleanupRule[] = [
-  {
-    id: '1',
-    name: 'Trim Whitespace',
-    enabled: true,
-    type: 'trim',
-    columns: [],
-    description: 'Remove leading and trailing spaces from all text fields'
-  },
-  {
-    id: '2',
-    name: 'Remove Duplicates',
-    enabled: false,
-    type: 'remove-duplicates',
-    columns: [],
-    description: 'Remove duplicate rows from the dataset'
-  },
-  {
-    id: '3',
-    name: 'Standardize to Uppercase',
-    enabled: false,
-    type: 'uppercase',
-    columns: [],
-    description: 'Convert all text to uppercase'
-  },
-  {
-    id: '4',
-    name: 'Remove Special Characters',
-    enabled: false,
-    type: 'remove-special-chars',
-    columns: [],
-    description: 'Remove special characters, keeping only letters, numbers, and spaces'
-  }
-];
+import { runCleanup } from '@/lib/runCleanup';
 
 const Index = () => {
   const [originalData, setOriginalData] = useState<DataRow[]>([]);
   const [currentData, setCurrentData] = useState<DataRow[]>([]);
   const [changes, setChanges] = useState<ChangeLog[]>([]);
-  const [rules, setRules] = useState<CleanupRule[]>(defaultRules);
   const [taxonomy, setTaxonomy] = useState<TaxonomyData>({});
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
   const [activeTab, setActiveTab] = useState('data');
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedRules = localStorage.getItem('cleanupRules');
-    if (savedRules) {
-      setRules(JSON.parse(savedRules));
-    }
-    
     const savedTaxonomy = localStorage.getItem('taxonomy');
-    if (savedTaxonomy) {
-      setTaxonomy(JSON.parse(savedTaxonomy));
-    }
+    if (savedTaxonomy) setTaxonomy(JSON.parse(savedTaxonomy));
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('cleanupRules', JSON.stringify(rules));
-  }, [rules]);
 
   useEffect(() => {
     localStorage.setItem('taxonomy', JSON.stringify(taxonomy));
@@ -91,21 +43,14 @@ const Index = () => {
     setCurrentData(data);
     setChanges([]);
     setValidationIssues([]);
-    
-    const columns = data.length > 0 ? Object.keys(data[0]) : [];
-    const updatedRules = rules.map(rule => ({
-      ...rule,
-      columns: rule.columns.length === 0 ? columns : rule.columns
-    }));
-    setRules(updatedRules);
   };
 
   const runValidation = () => {
     const columns = currentData.length > 0 ? Object.keys(currentData[0]) : [];
     const columnsToValidate: Record<string, string> = {};
-    
+
     Object.keys(taxonomy).forEach(taxonomyKey => {
-      const matchingColumn = columns.find(col => 
+      const matchingColumn = columns.find(col =>
         col.toLowerCase().includes(taxonomyKey.toLowerCase()) ||
         taxonomyKey.toLowerCase().includes(col.toLowerCase())
       );
@@ -120,19 +65,29 @@ const Index = () => {
 
   const handleDataChange = (newData: DataRow[], change?: ChangeLog) => {
     setCurrentData(newData);
-    if (change) {
-      setChanges(prev => [...prev, change]);
-    }
+    if (change) setChanges(prev => [...prev, change]);
   };
 
   const handleRunCleanup = () => {
-    const { cleanedData, changes: newChanges } = applyCleanupRules(currentData, rules);
-    setCurrentData(cleanedData);
-    setChanges(prev => [...prev, ...newChanges]);
+    // Built-in pipeline. Taxonomy stays for validation step.
+    const { rows, errors } = runCleanup(currentData);
+    setCurrentData(rows);
+    // Optionally record a single change entry so ChangeLog isn’t empty.
+    if (errors?.length) {
+      setChanges(prev => [
+        ...prev,
+        { id: String(Date.now()), description: `Cleanup applied with ${errors.length} validation warnings` } as ChangeLog,
+      ]);
+    } else {
+      setChanges(prev => [
+        ...prev,
+        { id: String(Date.now()), description: `Cleanup applied (${rows.length} rows)` } as ChangeLog,
+      ]);
+    }
     runValidation();
     toast({
       title: 'Cleanup completed',
-      description: `${newChanges.length} changes applied`,
+      description: `Rows processed: ${rows.length}`,
     });
   };
 
@@ -141,30 +96,24 @@ const Index = () => {
     setChanges([]);
     setValidationIssues([]);
     runValidation();
-    toast({
-      title: 'Data reset',
-      description: 'All changes have been reverted',
-    });
+    toast({ title: 'Data reset', description: 'All changes reverted' });
   };
 
   const handleAddToTaxonomy = (taxonomyKey: string, value: string) => {
     const updatedTaxonomy = {
       ...taxonomy,
-      [taxonomyKey]: [...(taxonomy[taxonomyKey] || []), value]
+      [taxonomyKey]: [...(taxonomy[taxonomyKey] || []), value],
     };
     setTaxonomy(updatedTaxonomy);
-    
-    setValidationIssues(prev => 
+
+    setValidationIssues(prev =>
       prev.filter(issue => !(issue.taxonomyKey === taxonomyKey && issue.value === value))
     );
   };
 
   const handleExportData = () => {
     exportToExcel(currentData, `cleaned-data-${Date.now()}.xlsx`);
-    toast({
-      title: 'Data exported',
-      description: 'Your cleaned data has been downloaded',
-    });
+    toast({ title: 'Data exported', description: 'Cleaned data downloaded' });
   };
 
   return (
@@ -206,15 +155,13 @@ const Index = () => {
               <h3 className="font-semibold mb-2 text-foreground">How it works:</h3>
               <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
                 <li>Upload your CSV or Excel file</li>
-                <li>Configure cleanup rules or edit data manually</li>
-                <li>Run automated cleanup</li>
-                <li>Review all changes in the change log</li>
+                <li>Run automated cleanup with built-in rules</li>
+                <li>Review issues against your taxonomy</li>
                 <li>Export cleaned data and change report</li>
               </ol>
               <div className="mt-4 p-4 bg-accent/50 rounded-lg">
                 <p className="text-sm text-foreground">
                   <strong>100% Local & Offline:</strong> All processing happens in your browser.
-                  No data leaves your computer. Perfect for on-premise deployment.
                 </p>
               </div>
             </div>
@@ -232,13 +179,8 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="data" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
-                  <DataTable data={currentData} onDataChange={handleDataChange} />
-                </div>
-                <div className="space-y-6">
-                  <CleanupRules rules={rules} onRulesChange={setRules} />
-                </div>
+              <div className="grid grid-cols-1">
+                <DataTable data={currentData} onDataChange={handleDataChange} />
               </div>
               <ChangeLogView changes={changes} />
             </TabsContent>
@@ -248,15 +190,15 @@ const Index = () => {
             </TabsContent>
 
             <TabsContent value="issues" className="space-y-6">
-              <ValidationIssues 
-                issues={validationIssues} 
+              <ValidationIssues
+                issues={validationIssues}
                 taxonomy={taxonomy}
                 onAddToTaxonomy={handleAddToTaxonomy}
               />
             </TabsContent>
 
             <TabsContent value="dashboard" className="space-y-6">
-              <Dashboard 
+              <Dashboard
                 data={currentData}
                 changes={changes}
                 issues={validationIssues}
