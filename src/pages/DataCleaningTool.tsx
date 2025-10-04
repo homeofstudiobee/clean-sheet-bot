@@ -16,7 +16,8 @@ import { processData, ProcessingResult } from '@/utils/dataProcessor';
 import { createDefaultValidationConfig, exportTaxonomyToCSV } from '@/utils/taxonomyLoader';
 import { exportToExcel } from '@/utils/fileHandlers';
 import { saveTaxonomies, loadTaxonomies, clearTaxonomies, getCacheTimestamp } from '@/utils/taxonomyStorage';
-import { Upload, Play, Download, Database, Trash2, FileCheck } from 'lucide-react';
+import { Upload, Play, Download, Database, Trash2, FileCheck, Loader2 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import yaml from 'js-yaml';
 
 export const DataCleaningTool: React.FC = () => {
@@ -32,6 +33,9 @@ export const DataCleaningTool: React.FC = () => {
   const [validationRules, setValidationRules] = useState<any>(null);
   const [dataFilename, setDataFilename] = useState<string>('');
   const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingMessage, setProcessingMessage] = useState('');
 
   // Auto-load built-in rules on mount
   useEffect(() => {
@@ -126,8 +130,23 @@ export const DataCleaningTool: React.FC = () => {
       return;
     }
 
+    setIsProcessing(true);
+    setProcessingProgress(0);
+    setProcessingMessage('Initializing...');
+
     try {
-      const result = processData(rawData, taxonomies, validationConfig, validationRules, dataFilename);
+      const result = processData(
+        rawData, 
+        taxonomies, 
+        validationConfig, 
+        validationRules, 
+        dataFilename,
+        (progress, message) => {
+          setProcessingProgress(progress);
+          setProcessingMessage(message);
+        }
+      );
+      
       setProcessingResult(result);
       setCleanedData(result.cleanedData);
       
@@ -144,6 +163,10 @@ export const DataCleaningTool: React.FC = () => {
         description: error instanceof Error ? error.message : 'Unknown error occurred',
         variant: 'destructive'
       });
+    } finally {
+      setIsProcessing(false);
+      setProcessingProgress(0);
+      setProcessingMessage('');
     }
   };
 
@@ -216,19 +239,11 @@ export const DataCleaningTool: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-2">
-          {hasData && (
-            <>
-              <Button onClick={handleRunProcessing} variant="default" disabled={!canProcess}>
-                <Play className="h-4 w-4 mr-2" />
-                Run Processing
-              </Button>
-              {hasProcessed && (
-                <Button onClick={handleExportCleaned} variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Cleaned
-                </Button>
-              )}
-            </>
+          {hasProcessed && (
+            <Button onClick={handleExportCleaned} variant="default">
+              <Download className="h-4 w-4 mr-2" />
+              Export Cleaned Data
+            </Button>
           )}
         </div>
       </header>
@@ -275,7 +290,7 @@ export const DataCleaningTool: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-5 w-full">
+        <TabsList className="grid grid-cols-6 w-full">
           <TabsTrigger value="upload">
             <Upload className="h-4 w-4 mr-2" />
             Upload Data
@@ -290,6 +305,9 @@ export const DataCleaningTool: React.FC = () => {
           </TabsTrigger>
           <TabsTrigger value="cleaned" disabled={!hasProcessed}>
             Cleaned Data
+          </TabsTrigger>
+          <TabsTrigger value="review" disabled={!hasProcessed}>
+            Review & Flag
           </TabsTrigger>
           <TabsTrigger value="exceptions" disabled={!hasProcessed}>
             Exceptions ({processingResult?.exceptions.length || 0})
@@ -429,9 +447,35 @@ export const DataCleaningTool: React.FC = () => {
                   Please upload validation rules, all 6 taxonomies, and data file before processing.
                 </div>
               )}
-              <Button onClick={handleRunProcessing} className="w-full" size="lg" disabled={!canProcess}>
-                <Play className="h-5 w-5 mr-2" />
-                Run Full Processing Pipeline
+              
+              {isProcessing && (
+                <div className="space-y-3 p-4 bg-muted rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm font-medium">{processingMessage}</span>
+                  </div>
+                  <Progress value={processingProgress} />
+                  <p className="text-xs text-muted-foreground">{processingProgress}% complete</p>
+                </div>
+              )}
+
+              <Button 
+                onClick={handleRunProcessing} 
+                className="w-full" 
+                size="lg" 
+                disabled={!canProcess || isProcessing}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-5 w-5 mr-2" />
+                    Process Data with All Rules
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>
@@ -439,19 +483,49 @@ export const DataCleaningTool: React.FC = () => {
 
         <TabsContent value="cleaned" className="space-y-6">
           {processingResult && (
-            <>
-              <DataTable
-                data={cleanedData}
-                onDataChange={setCleanedData}
-              />
-              
-              <UnmappedItemsReview
-                todoLists={processingResult.todoLists}
-                taxonomies={taxonomies}
-                onAddToTaxonomy={handleAddToTaxonomy}
-                onExportTodo={handleExportTodo}
-              />
-            </>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Cleaned Data</CardTitle>
+                    <CardDescription>
+                      {cleanedData.length} rows processed and ready for export
+                    </CardDescription>
+                  </div>
+                  <Button onClick={handleExportCleaned} variant="default">
+                    <Download className="h-4 w-4 mr-2" />
+                    Export to Excel
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <DataTable
+                  data={cleanedData}
+                  onDataChange={setCleanedData}
+                />
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="review" className="space-y-6">
+          {processingResult && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Review & Flag Items for Markets</CardTitle>
+                <CardDescription>
+                  Items requiring manual review and classification. Add to taxonomies or export for market teams.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <UnmappedItemsReview
+                  todoLists={processingResult.todoLists}
+                  taxonomies={taxonomies}
+                  onAddToTaxonomy={handleAddToTaxonomy}
+                  onExportTodo={handleExportTodo}
+                />
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 

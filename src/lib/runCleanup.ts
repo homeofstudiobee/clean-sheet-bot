@@ -1,5 +1,5 @@
 // src/lib/runCleanup.ts
-import { DEFAULT_RULES } from "@/lib/rules"; // or "@/config/rules"
+import { DEFAULT_RULES } from "@/config/rules";
 import { clean, normalizeHeaders } from "@/lib/cleanup";
 import { normHeader, normValue } from "@/utils/normalize";
 

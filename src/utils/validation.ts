@@ -31,13 +31,13 @@ export function validateAgainstTaxonomy(
       if (v === "") continue; // empty handled elsewhere if needed
       if (!allowed.get(taxKey)!.has(v)) {
         issues.push({
+          id: `${idx}-${rawCol}-${Date.now()}`,
           rowIndex: idx,
           column: rawCol,
           value: v,
           taxonomyKey: rawTaxKey,
-          message: `Value not in taxonomy for ${rawTaxKey}`,
-          severity: "warning",
-        } as ValidationIssue);
+          timestamp: new Date()
+        });
       }
     }
   });

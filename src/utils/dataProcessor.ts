@@ -34,7 +34,8 @@ export const processData = (
   taxonomies: Record<string, TaxonomyDefinition>,
   validationConfig: ValidationConfig,
   validationRules?: any,
-  filename?: string
+  filename?: string,
+  onProgress?: (progress: number, message: string) => void
 ): ProcessingResult => {
   const cleanedData: DataRow[] = [];
   const exceptions: ProcessingResult['exceptions'] = [];
@@ -54,7 +55,18 @@ export const processData = (
   const fxRatesTax = taxonomies['fx_rates'];
   const cbhtTax = taxonomies['cbht'];
 
+  const totalRows = rawData.length;
+  const steps = 9; // Number of major processing steps
+  let currentStep = 0;
+
+  onProgress?.(0, 'Starting data processing...');
+
   rawData.forEach((row, rowIndex) => {
+    // Report progress every 100 rows
+    if (rowIndex % 100 === 0) {
+      const progress = Math.floor((rowIndex / totalRows) * 90); // Reserve 10% for final steps
+      onProgress?.(progress, `Processing row ${rowIndex + 1} of ${totalRows}...`);
+    }
     // 0. Normalize headers and trim all values
     let cleanedRow = normalizeHeaders(row);
 
@@ -287,6 +299,11 @@ export const processData = (
 
     cleanedData.push(cleanedRow);
   });
+
+  onProgress?.(95, 'Finalizing results...');
+
+  // Final progress
+  onProgress?.(100, `Processing complete! ${cleanedData.length} rows processed, ${exceptions.length} exceptions found.`);
 
   return {
     cleanedData,
