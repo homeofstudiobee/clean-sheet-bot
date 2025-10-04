@@ -68,10 +68,6 @@ const Index = () => {
   setValidationIssues(issues);
 };
 
-    const issues = validateAgainstTaxonomy(currentData, taxonomy, columnsToValidate);
-    setValidationIssues(issues);
-  };
-
   const handleDataChange = (newData: DataRow[], change?: ChangeLog) => {
     setCurrentData(newData);
     if (change) setChanges(prev => [...prev, change]);
