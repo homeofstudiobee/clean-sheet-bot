@@ -1,28 +1,33 @@
 // src/lib/runCleanup.ts
-import { DEFAULT_RULES } from "@/config/rules";
-import { clean, normalizeHeaders } from "@/lib/cleanup";
-import { normHeader, normValue } from "@/utils/normalize";
+import { decodeText, parseCsvFromText } from "@/utils/csv";
+import { validateAgainstTaxonomy, Rules, ValidationOutput } from "@/utils/validation";
 
-export function runCleanup(inputRows: any[], taxonomyRows?: any[]) {
-  if (!inputRows?.length) return { rows: [], errors: ["no input rows"] };
+export type CleanupResult = ValidationOutput & {
+  delimiter: string;
+  headers: string[];
+};
 
-  // normalize headers
-  const rawHeaders = Object.keys(inputRows[0]);
-  const headers = rawHeaders.map(normHeader);
+export async function runCleanup(file: File, rulesYamlFile?: File | null): Promise<CleanupResult> {
+  const buf = await file.arrayBuffer();
+  const text = decodeText(buf);
+  const parsed = parseCsvFromText(text);
 
-  // normalize values
-  const rows = inputRows.map(r =>
-    Object.fromEntries(
-      headers.map((h, i) => [h, normValue(r[rawHeaders[i]])])
-    )
-  );
+  let rules: Rules | null = null;
+  if (rulesYamlFile) {
+    const yamlText = await rulesYamlFile.text();
+    try {
+      // lazy import only when provided
+      const { default: YAML } = await import("js-yaml");
+      rules = (YAML.load(yamlText) ?? null) as Rules | null;
+    } catch {
+      rules = null;
+    }
+  }
 
-  // optional: normalize taxonomy rows too if provided
-  const normTax =
-    taxonomyRows?.map((t: any) =>
-      Object.fromEntries(Object.entries(t).map(([k, v]) => [normHeader(k), normValue(v as any)]))
-    ) ?? undefined;
-
-  const { rows: cleaned, errors } = clean(rows, DEFAULT_RULES, normTax);
-  return { rows: cleaned, errors };
+  const out = validateAgainstTaxonomy(parsed.rows, parsed.headers, rules);
+  return {
+    ...out,
+    delimiter: parsed.delimiter,
+    headers: parsed.headers,
+  };
 }
