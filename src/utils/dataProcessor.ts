@@ -1,313 +1,362 @@
-import { DataRow } from '@/types/data';
-import { TaxonomyDefinition, ValidationConfig } from '@/types/taxonomyConfig';
-import { mapBrand, generateBrandTodoEntry } from './brandMapping';
-import { mapCampaign, generateCampaignTodoEntry } from './campaignMapping';
-import { lookupCBHT, generateCBHTTodoEntry } from './cbhtMapping';
-import { applyDefaults, validateObjective, fillMissingDates, backfillActuals, extractFxYearFromFilename } from './dataCleanup';
-import { normalizeHeaders, normalizeCurrency, extractYearFromFilename } from './headerNormalization';
+// src/utils/dataProcessor.ts
+import type { DataRow, IssueSummary, Rules, ChangeLog } from "@/types/data";
+import type { TaxonomyDefinition, ValidationConfig } from "@/types/taxonomyConfig";
+import { validateAgainstTaxonomy } from "@/utils/validation";
 
-export interface ProcessingResult {
+// Local cell + row types aligned to DataRow (no boolean in values)
+type Cell = string | number | null | undefined;
+type Row = Record<string, Cell>;
+
+export type TodoLists = {
+  brands: DataRow[];
+  campaigns: DataRow[];
+  vendors: DataRow[];
+  channels: DataRow[];
+  fx_rates: DataRow[];
+  cbht: DataRow[];
+};
+
+export type ProcessingResult = {
   cleanedData: DataRow[];
-  exceptions: Array<{
-    rowNumber: number;
-    field: string;
-    issueType: string;
-    originalValue: string;
-    newValue: string;
-    notes: string;
-  }>;
-  todoLists: {
-    brands: Array<Record<string, any>>;
-    campaigns: Array<Record<string, any>>;
-    vendors: Array<Record<string, any>>;
-    channels: Array<Record<string, any>>;
-    cbht: Array<Record<string, any>>;
+  exceptions: Row[];
+  summary: IssueSummary;
+  warnings: { code: string; msg: string }[];
+  mode: "LIGHT" | "STRICT";
+  headers: string[];
+  delimiter: string;
+  changeLog: ChangeLog[];
+  todoLists: TodoLists;
+};
+
+const DEFAULT_CURRENCY = "USD";
+const FILL_STR = "Unmapped";
+const FILL_MARKET = "Global";
+
+const CANON = {
+  brand: "brand",
+  campaign: "campaign",
+  vendor: "vendor",
+  channel: "channel",
+  market: "market",
+  currency: "currency",
+  spend: "spend",
+  spendUsd: "spend_usd",
+  date: "date",
+  dateIso: "date_iso",
+} as const;
+
+const SYN = {
+  brand: ["brand", "brand_name", "advertiser", "client"],
+  campaign: ["campaign", "campaign_name", "line_item", "activity"],
+  vendor: ["vendor", "partner", "publisher", "supplier", "media_owner"],
+  channel: ["channel", "channel_name", "medium", "placement_channel"],
+  market: ["market", "country", "region", "geo"],
+  currency: ["currency", "ccy"],
+  spend: ["spend", "amount", "cost", "budget", "value"],
+  date: ["date", "start_date", "month_start", "date_start"],
+  month: ["month", "mo"],
+  year: ["year", "yr"],
+};
+
+export async function processData(
+  data: DataRow[],
+  taxonomies: Record<string, TaxonomyDefinition>,
+  _validationConfig: ValidationConfig,
+  validationRules: unknown,
+  _dataFilename: string,
+  onProgress?: (pct: number, msg?: string) => void
+): Promise<ProcessingResult> {
+  const changeLog: ChangeLog[] = [];
+  const todos: TodoLists = { brands: [], campaigns: [], vendors: [], channels: [], fx_rates: [], cbht: [] };
+
+  onProgress?.(5, "Normalizing…");
+  const rows = (data as Row[]).map((r, i) => normalizeRow(r, i, changeLog));
+
+  onProgress?.(25, "Hard remapping…");
+  const lookups = buildLookups(taxonomies);
+  const remapped = rows.map((r, i) => hardRemap(r, i, lookups, changeLog, todos));
+
+  onProgress?.(60, "FX + dates…");
+  const finalRows = remapped.map((r, i) => deriveFxAndDates(r, i, lookups, changeLog));
+
+  // grouped validation (optional)
+  onProgress?.(75, "Validating…");
+  const headers = collectHeaders(finalRows);
+  const rules = (validationRules as Rules) ?? null;
+
+  let mode: "LIGHT" | "STRICT" = "LIGHT";
+  let warnings: { code: string; msg: string }[] = [];
+  let summary: IssueSummary = {};
+  let exceptions: Row[] = [];
+
+  try {
+    const v = validateAgainstTaxonomy(finalRows as Record<string, unknown>[], headers, rules);
+    mode = v.mode;
+    warnings = v.warnings;
+    summary = v.summary;
+    exceptions = flattenSummarySamples(summary);
+  } catch {
+    // optional
+  }
+
+  onProgress?.(100, `Done. ${finalRows.length} rows.`);
+
+  return {
+    cleanedData: finalRows as DataRow[],
+    exceptions,
+    summary,
+    warnings,
+    mode,
+    headers,
+    delimiter: ",",
+    changeLog,
+    todoLists: todos,
   };
 }
 
-/**
- * Main data processing pipeline
- * Applies all mappings, validations, and transformations
- */
-export const processData = (
-  rawData: DataRow[],
-  taxonomies: Record<string, TaxonomyDefinition>,
-  validationConfig: ValidationConfig,
-  validationRules?: any,
-  filename?: string,
-  onProgress?: (progress: number, message: string) => void
-): ProcessingResult => {
-  const cleanedData: DataRow[] = [];
-  const exceptions: ProcessingResult['exceptions'] = [];
-  const todoLists: ProcessingResult['todoLists'] = {
-    brands: [],
-    campaigns: [],
-    vendors: [],
-    channels: [],
-    cbht: []
-  };
+export default { processData };
 
-  // Get taxonomies
-  const brandsTax = taxonomies['brands'];
-  const campaignsTax = taxonomies['campaigns'];
-  const vendorsTax = taxonomies['vendors'];
-  const channelsTax = taxonomies['channels'];
-  const fxRatesTax = taxonomies['fx_rates'];
-  const cbhtTax = taxonomies['cbht'];
-
-  const totalRows = rawData.length;
-  const steps = 9; // Number of major processing steps
-  let currentStep = 0;
-
-  onProgress?.(0, 'Starting data processing...');
-
-  rawData.forEach((row, rowIndex) => {
-    // Report progress every 100 rows
-    if (rowIndex % 100 === 0) {
-      const progress = Math.floor((rowIndex / totalRows) * 90); // Reserve 10% for final steps
-      onProgress?.(progress, `Processing row ${rowIndex + 1} of ${totalRows}...`);
-    }
-    // 0. Normalize headers and trim all values
-    let cleanedRow = normalizeHeaders(row);
-
-    // 1. Apply defaults and temporary fills from YAML rules
-    if (validationRules) {
-      cleanedRow = applyDefaults(
-        cleanedRow,
-        validationRules.defaults,
-        validationRules.temporary_fills
-      );
-
-      // Extract FX_Year from filename if not present
-      if (filename && !cleanedRow.FX_Year) {
-        cleanedRow.FX_Year = extractYearFromFilename(filename);
-      }
-
-      // Normalize currency
-      if (cleanedRow.Currency) {
-        cleanedRow.Currency = normalizeCurrency(String(cleanedRow.Currency));
-      }
-
-      // Fill missing dates
-      cleanedRow = fillMissingDates(cleanedRow);
-
-      // Backfill actuals for old lines
-      cleanedRow = backfillActuals(cleanedRow);
-
-      // Validate Objective
-      if (validationRules.allowed_objectives) {
-        const objectiveValidation = validateObjective(
-          String(cleanedRow.Objective || ''),
-          validationRules.allowed_objectives,
-          validationRules.defaults?.Objective || 'Other'
-        );
-
-        if (!objectiveValidation.isValid) {
-          exceptions.push({
-            rowNumber: rowIndex + 2, // +2 because Excel is 1-indexed and has header row
-            field: 'Objective',
-            issueType: 'invalid_objective',
-            originalValue: String(row.Objective || ''),
-            newValue: objectiveValidation.value,
-            notes: `Market: ${row.Market || ''}, Plan: ${row['Plan Name'] || row.PlanId || ''}`
-          });
-        }
-
-        cleanedRow.Objective = objectiveValidation.value;
-      }
-    }
-
-    // 1. Brand Mapping
-    if (brandsTax && validationConfig.brand_mapping) {
-      const brandResult = mapBrand(cleanedRow, brandsTax, validationConfig.brand_mapping);
-      if (brandResult.matched) {
-        Object.assign(cleanedRow, brandResult.outputs);
-      } else {
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'Brand',
-          issueType: 'brand_unmapped',
-          originalValue: String(row.Brand || ''),
-          newValue: '',
-          notes: `Market: ${row.Market || ''}, Variant: ${row.Variant || ''}`
-        });
-        todoLists.brands.push(generateBrandTodoEntry(row, rowIndex));
-      }
-    }
-
-    // 2. Campaign Mapping
-    if (campaignsTax && validationConfig.campaign_mapping) {
-      const campaignResult = mapCampaign(cleanedRow, campaignsTax, validationConfig.campaign_mapping);
-      if (campaignResult.matched) {
-        Object.assign(cleanedRow, campaignResult.outputs);
-      } else {
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'Campaign Name',
-          issueType: 'campaign_unmapped',
-          originalValue: String(row['Campaign Name'] || ''),
-          newValue: '',
-          notes: `Market: ${row.Market || ''}, Brand: ${row.Brand || ''}, Plan: ${row['Plan Name'] || ''}`
-        });
-        todoLists.campaigns.push(generateCampaignTodoEntry(row, rowIndex));
-      }
-    }
-
-    // 3. Vendor Mapping
-    if (vendorsTax) {
-      const vendorMatch = vendorsTax.data.find(v => 
-        String(v.raw_vendor || '').trim().toLowerCase() === String(row.Vendor || '').trim().toLowerCase()
-      );
-      if (vendorMatch) {
-        cleanedRow.Vendor_clean = vendorMatch.vendor_clean || '';
-        cleanedRow.Vendor_House = vendorMatch.vendor_house || '';
-        cleanedRow.Vendor_Type = vendorMatch.vendor_type || '';
-      } else {
-        cleanedRow.Vendor_clean = '_Placeholder';
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'Vendor',
-          issueType: 'vendor_unmapped',
-          originalValue: String(row.Vendor || ''),
-          newValue: '_Placeholder',
-          notes: `Market: ${row.Market || ''}`
-        });
-        todoLists.vendors.push({
-          rowIndex,
-          raw_vendor: row.Vendor || '',
-          vendor_clean: '',
-          vendor_house: '',
-          vendor_type: ''
-        });
-      }
-    }
-
-    // 4. Channel Mapping
-    if (channelsTax) {
-      const channelMatch = channelsTax.data.find(c => 
-        (String(c['Sub-Channel'] || c.SubChannel || '').trim().toLowerCase() === String(row['Sub-Channel'] || '').trim().toLowerCase()) ||
-        (String(c.Channel || '').trim().toLowerCase() === String(row.Channel || '').trim().toLowerCase())
-      );
-      if (channelMatch) {
-        cleanedRow.Channel_clean = channelMatch.Channel || '';
-        cleanedRow.SubChannel_clean = channelMatch['Sub-Channel'] || channelMatch.SubChannel || '';
-        cleanedRow.ChannelFinanceGroup_clean = channelMatch.ChannelFinanceGroup || '';
-        cleanedRow.ExComChannel = channelMatch.ExComChannel || '';
-      } else {
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'Channel',
-          issueType: 'channel_unmapped',
-          originalValue: `${row.Channel || ''}|${row.SubChannel || row['Sub-Channel'] || ''}`,
-          newValue: '',
-          notes: `Market: ${row.Market || ''}`
-        });
-        todoLists.channels.push({
-          rowIndex,
-          channel: row.Channel || '',
-          subChannel: row.SubChannel || row['Sub-Channel'] || '',
-          channelFinanceGroup: '',
-          exComChannel: ''
-        });
-      }
-    }
-
-    // 5. FX Conversion
-    if (fxRatesTax && validationConfig.fx_rules) {
-      const fxMatch = fxRatesTax.data.find(fx => 
-        String(fx.market || '').trim().toLowerCase() === String(row.Market || '').trim().toLowerCase() &&
-        String(fx.currency || '').trim().toLowerCase() === String(row.Currency || '').trim().toLowerCase() &&
-        String(fx.fx_year || '') === String(row.FX_Year || '')
-      );
-
-      if (fxMatch) {
-        const fxToEur = parseFloat(String(fxMatch.fx_to_eur || '0'));
-        const fxToDkk = parseFloat(String(fxMatch.fx_to_dkk || '0'));
-        cleanedRow.Region = fxMatch.region || cleanedRow.Region;
-
-        // Apply FX conversions
-        const fxRules = validationConfig.fx_rules;
-        if (fxRules.compute_pairs?.eur) {
-          fxRules.compute_pairs.eur.forEach(([sourceCol, targetCol]) => {
-            const sourceValue = parseFloat(String(row[sourceCol] || '0'));
-            cleanedRow[targetCol] = sourceValue * fxToEur;
-          });
-        }
-        if (fxRules.compute_pairs?.dkk) {
-          fxRules.compute_pairs.dkk.forEach(([sourceCol, targetCol]) => {
-            const sourceValue = parseFloat(String(row[sourceCol] || '0'));
-            cleanedRow[targetCol] = sourceValue * fxToDkk;
-          });
-        }
-
-        // Audit EUR vs Global
-        if (fxRules.audit_global_vs_eur?.enabled) {
-          const tolerance = fxRules.audit_global_vs_eur.tolerance_ratio || 0.02;
-          const checks = [
-            ['Total Cost to Client (Global)', 'Planned_Spend_EUR'],
-            ['Total Cost to Client Actual (Global)', 'Actualised_Spend_EUR'],
-            ['Net Media Cost (Global)', 'Net_Media_EUR']
-          ];
-          
-          checks.forEach(([globalCol, eurCol]) => {
-            if (row[globalCol] && cleanedRow[eurCol]) {
-              const globalVal = parseFloat(String(row[globalCol]));
-              const eurVal = parseFloat(String(cleanedRow[eurCol]));
-              if (globalVal > 0 && Math.abs(globalVal - eurVal) / globalVal > tolerance) {
-                exceptions.push({
-                  rowNumber: rowIndex + 2,
-                  field: eurCol,
-                  issueType: 'eur_mismatch',
-                  originalValue: String(globalVal),
-                  newValue: String(eurVal),
-                  notes: `Global vs EUR mismatch exceeds ${(tolerance * 100).toFixed(0)}% tolerance`
-                });
-              }
-            }
-          });
-        }
-      } else {
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'FX',
-          issueType: 'fx_missing',
-          originalValue: `${row.Market || ''}/${cleanedRow.Currency || row.Currency || ''}/${cleanedRow.FX_Year || ''}`,
-          newValue: '',
-          notes: 'No FX rate found for this Market/Currency/Year combination'
-        });
-      }
-    }
-
-    // 6. CBHT Join
-    if (cbhtTax && validationConfig.cbht_rules) {
-      const cbhtResult = lookupCBHT(cleanedRow, cbhtTax, validationConfig.cbht_rules.join_keys_order);
-      if (cbhtResult.matched && cbhtResult.cbhtData) {
-        cleanedRow.CBHT_Brand_League = cbhtResult.cbhtData.brand_league || '';
-        cleanedRow.CBHT_Study = cbhtResult.cbhtData.cbht_study || '';
-      } else {
-        exceptions.push({
-          rowNumber: rowIndex + 2,
-          field: 'CBHT',
-          issueType: 'cbht_missing',
-          originalValue: String(cleanedRow.Brand_clean || row.Brand || ''),
-          newValue: '',
-          notes: `Market: ${row.Market || ''}, FX_Year: ${cleanedRow.FX_Year || ''}`
-        });
-        todoLists.cbht.push(generateCBHTTodoEntry(cleanedRow, rowIndex));
-      }
-    }
-
-    cleanedData.push(cleanedRow);
-  });
-
-  onProgress?.(95, 'Finalizing results...');
-
-  // Final progress
-  onProgress?.(100, `Processing complete! ${cleanedData.length} rows processed, ${exceptions.length} exceptions found.`);
-
-  return {
-    cleanedData,
-    exceptions,
-    todoLists
-  };
+// ---------- helpers ----------
+type Lookup = {
+  brands: Set<string>;
+  campaigns: Set<string>;
+  vendors: Set<string>;
+  channels: Set<string>;
+  markets: Set<string>;
+  fx: Array<{ from: string; to: string; rate: number }>;
 };
+
+function collectHeaders(rows: Row[]): string[] {
+  const set = new Set<string>();
+  rows.forEach((r) => Object.keys(r).forEach((k) => set.add(k)));
+  return Array.from(set);
+}
+
+function normalizeRow(r: Row, rowIndex: number, log: ChangeLog[]): Row {
+  const out: Row = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (typeof v === "string") {
+      const orig = v;
+      const norm = v.replace(/\uFEFF/g, "").normalize("NFKC").trim().replace(/\s+/g, " ");
+      out[k] = norm;
+      if (norm !== orig) pushChange(log, rowIndex, k, "automated", orig, norm, "normalize");
+    } else out[k] = v;
+  }
+  return out;
+}
+
+function buildLookups(taxonomies: Record<string, TaxonomyDefinition>): Lookup {
+  const norm = (s: Cell) => String(s ?? "").trim().toLowerCase();
+  const asSet = (tx?: TaxonomyDefinition, keys: string[] = []) => {
+    const s = new Set<string>();
+    if (!tx?.data) return s;
+    for (const row of tx.data as Record<string, unknown>[]) {
+      for (const k of keys) {
+        const v = (row as Record<string, unknown>)[k];
+        if (v != null) s.add(norm(v as Cell));
+      }
+    }
+    return s;
+  };
+
+  const brands = asSet(taxonomies["brands"], ["brand", "brand_name", "name"]);
+  const campaigns = asSet(taxonomies["campaigns"], ["campaign", "campaign_name", "name"]);
+  const vendors = asSet(taxonomies["vendors"], ["vendor", "name", "publisher", "partner"]);
+  const channels = asSet(taxonomies["channels"], ["channel", "name", "medium"]);
+  const markets = asSet(taxonomies["cbht"], ["market", "country", "region", "geo"]);
+
+  const fx: Array<{ from: string; to: string; rate: number }> = [];
+  const fxTx = taxonomies["fx_rates"];
+  if (fxTx?.data?.length) {
+    for (const r of fxTx.data as Record<string, unknown>[]) {
+      const from = toUpper3((r as Row)["from"] ?? (r as Row)["currency"] ?? "");
+      const to = toUpper3((r as Row)["to"] ?? "USD");
+      const rate = Number((r as Row)["rate"] ?? (r as Row)["fx"] ?? 1);
+      if (from && to && Number.isFinite(rate) && rate > 0) fx.push({ from, to, rate });
+    }
+  }
+  return { brands, campaigns, vendors, channels, markets, fx };
+}
+
+function toUpper3(v: Cell, fallback = DEFAULT_CURRENCY): string {
+  const t = typeof v === "string" ? v.trim().toUpperCase() : "";
+  return t || fallback;
+}
+function findField(row: Row, cands: string[]): string | undefined {
+  for (const c of cands) {
+    const key = Object.keys(row).find((h) => h.toLowerCase() === c.toLowerCase());
+    if (key) return key;
+  }
+  return undefined;
+}
+
+function hardRemap(row: Row, rowIndex: number, lookup: Lookup, log: ChangeLog[], todos: TodoLists): Row {
+  const out: Row = { ...row };
+  mapInto(out, rowIndex, lookup.brands, SYN.brand, CANON.brand, FILL_STR, "brand", todos.brands, log);
+  mapInto(out, rowIndex, lookup.campaigns, SYN.campaign, CANON.campaign, FILL_STR, "campaign", todos.campaigns, log);
+  mapInto(out, rowIndex, lookup.vendors, SYN.vendor, CANON.vendor, FILL_STR, "vendor", todos.vendors, log);
+  mapInto(out, rowIndex, lookup.channels, SYN.channel, CANON.channel, FILL_STR, "channel", todos.channels, log);
+  mapInto(out, rowIndex, lookup.markets, SYN.market, CANON.market, FILL_MARKET, "market", todos.cbht, log);
+
+  const kCur = findField(out, SYN.currency) ?? CANON.currency;
+  if (!(kCur in out)) {
+    out[kCur] = DEFAULT_CURRENCY;
+    pushChange(log, rowIndex, kCur, "automated", "", DEFAULT_CURRENCY, "create_field:currency");
+  } else {
+    const curOrig = out[kCur];
+    const curUp = toUpper3(curOrig);
+    if (curUp !== curOrig) pushChange(log, rowIndex, kCur, "automated", curOrig, curUp, "uppercase_currency");
+    out[kCur] = curUp;
+  }
+
+  const kAmt = findField(out, SYN.spend) ?? CANON.spend;
+  if (!(kAmt in out)) {
+    out[kAmt] = 0;
+    pushChange(log, rowIndex, kAmt, "automated", "", 0, "create_field:spend");
+  } else {
+    const sOrig = out[kAmt];
+    const sNum = parseNumber(sOrig);
+    if (String(sOrig) !== String(sNum)) pushChange(log, rowIndex, kAmt, "automated", sOrig, sNum, "coerce_number");
+    out[kAmt] = sNum;
+  }
+  return out;
+}
+
+function mapInto(
+  out: Row,
+  rowIndex: number,
+  known: Set<string>,
+  syn: string[],
+  canonKey: string,
+  fill: string,
+  noteField: string,
+  todoBucket: DataRow[],
+  log: ChangeLog[]
+) {
+  const k = findField(out, syn);
+  const key = k ?? canonKey;
+
+  if (!(key in out)) {
+    out[key] = fill;
+    pushChange(log, rowIndex, key, "automated", "", fill, `create_field:${noteField}`);
+    return;
+  }
+
+  const raw = String(out[key] ?? "").trim();
+  if (!raw) {
+    out[key] = fill;
+    pushChange(log, rowIndex, key, "automated", "", fill, `fill_default:${noteField}`);
+    return;
+  }
+
+  const hit = known.has(raw.toLowerCase());
+  if (!hit) {
+    todoBucket.push({ field: noteField, raw } as unknown as DataRow);
+    out[key] = fill;
+    pushChange(log, rowIndex, key, "automated", raw, fill, `map_taxonomy:${noteField}`);
+  }
+}
+
+function parseNumber(v: Cell): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v !== "string") return 0;
+  const t = v.replace(/[^0-9.,()-]/g, "").trim();
+  if (!t) return 0;
+  const neg = /^\(.*\)$/.test(t);
+  const core = t.replace(/[(),]/g, "");
+  const n = Number(core);
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -n : n;
+}
+
+function deriveFxAndDates(row: Row, rowIndex: number, lookup: Lookup, log: ChangeLog[]): Row {
+  const out: Row = { ...row };
+
+  // FX
+  const amt = Number(out[CANON.spend] ?? 0);
+  const cur = String(out[CANON.currency] ?? DEFAULT_CURRENCY);
+  const usd = fxToUsd(lookup, amt, cur);
+  out[CANON.spendUsd] = usd;
+  pushChange(log, rowIndex, CANON.spendUsd, "automated", "", usd, `compute_fx_usd:${cur}->USD`);
+
+  // Date
+  const iso = toDateIso(out);
+  const kDate = findField(out, SYN.date) ?? CANON.date;
+  if (iso) {
+    const from = out[kDate] ?? "";
+    out[kDate] = iso;
+    out[CANON.dateIso] = iso;
+    if (String(from) !== iso) pushChange(log, rowIndex, kDate, "automated", from, iso, "coerce_date:ISO");
+  } else {
+    out[CANON.dateIso] = "";
+  }
+
+  return out;
+}
+
+function fxToUsd(lookup: Lookup, amount: number, currency: string): number {
+  if (!amount) return 0;
+  const cur = toUpper3(currency);
+  if (cur === "USD") return amount;
+
+  const direct = lookup.fx.find((r) => r.from === cur && r.to === "USD");
+  if (direct) return amount * direct.rate;
+
+  const inverse = lookup.fx.find((r) => r.from === "USD" && r.to === cur);
+  if (inverse && inverse.rate) return amount / inverse.rate;
+
+  return amount;
+}
+
+function toDateIso(row: Row): string {
+  const kDate = findField(row, SYN.date);
+  if (kDate && row[kDate]) {
+    const d = new Date(String(row[kDate]));
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  const kM = findField(row, SYN.month);
+  const kY = findField(row, SYN.year);
+  if (kM && kY && row[kM] && row[kY]) {
+    const m = String(row[kM]).padStart(2, "0");
+    const y = String(row[kY]).padStart(4, "0");
+    const d = new Date(`${y}-${m}-01T00:00:00Z`);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  return "";
+}
+
+function toScalar(v: Cell): string | number {
+  return typeof v === "number" ? v : String(v ?? "");
+}
+
+function pushChange(
+  log: ChangeLog[],
+  rowIndex: number,
+  column: string,
+  changeType: "automated" | "manual",
+  oldValue: Cell,
+  newValue: Cell,
+  rule?: string
+) {
+  const oldS = toScalar(oldValue);
+  const newS = toScalar(newValue);
+  if (oldS === newS) return;
+  log.push({
+    id: `${rowIndex}-${column}-${log.length}`,
+    rowIndex,
+    column,
+    oldValue: oldS,
+    newValue: newS,
+    changeType,
+    rule,
+    timestamp: new Date(),
+  });
+}
+
+function flattenSummarySamples(summary: IssueSummary): Row[] {
+  const rows: Row[] = [];
+  for (const [code, b] of Object.entries(summary)) {
+    for (const s of b.samples as Row[]) rows.push({ code, ...s });
+  }
+  return rows;
+}
