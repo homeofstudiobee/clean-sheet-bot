@@ -1,24 +1,5 @@
 // src/utils/validation.ts
-export type ColumnRule = {
-  required?: boolean;
-  oneOf?: string[];
-  pattern?: string;
-};
-
-export type Rules = {
-  columns?: Record<string, ColumnRule>;
-  required_columns?: string[];
-};
-
-export type IssueBucket = { count: number; samples: any[] };
-export type IssueSummary = Record<string, IssueBucket>;
-
-export type ValidationOutput = {
-  mode: "LIGHT" | "STRICT";
-  cleaned: Record<string, unknown>[];
-  summary: IssueSummary;
-  warnings: { code: string; msg: string }[];
-};
+import type { Rules, ValidationOutput, IssueSummary } from "@/types/data";
 
 const MAX_SAMPLES = 25;
 

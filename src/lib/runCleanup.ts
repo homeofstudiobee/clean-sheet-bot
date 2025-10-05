@@ -1,11 +1,7 @@
 // src/lib/runCleanup.ts
 import { decodeText, parseCsvFromText } from "@/utils/csv";
-import { validateAgainstTaxonomy, Rules, ValidationOutput } from "@/utils/validation";
-
-export type CleanupResult = ValidationOutput & {
-  delimiter: string;
-  headers: string[];
-};
+import { validateAgainstTaxonomy } from "@/utils/validation";
+import type { Rules, CleanupResult } from "@/types/data";
 
 export async function runCleanup(file: File, rulesYamlFile?: File | null): Promise<CleanupResult> {
   const buf = await file.arrayBuffer();
@@ -14,9 +10,8 @@ export async function runCleanup(file: File, rulesYamlFile?: File | null): Promi
 
   let rules: Rules | null = null;
   if (rulesYamlFile) {
-    const yamlText = await rulesYamlFile.text();
     try {
-      // lazy import only when provided
+      const yamlText = await rulesYamlFile.text();
       const { default: YAML } = await import("js-yaml");
       rules = (YAML.load(yamlText) ?? null) as Rules | null;
     } catch {
@@ -25,9 +20,5 @@ export async function runCleanup(file: File, rulesYamlFile?: File | null): Promi
   }
 
   const out = validateAgainstTaxonomy(parsed.rows, parsed.headers, rules);
-  return {
-    ...out,
-    delimiter: parsed.delimiter,
-    headers: parsed.headers,
-  };
+  return { ...out, delimiter: parsed.delimiter, headers: parsed.headers };
 }

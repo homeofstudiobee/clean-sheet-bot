@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Play, RotateCcw, BarChart3 } from 'lucide-react';
 import { diffRows, buildMarketTasks } from '@/utils/changeReport';
 import { exportToExcel, exportWorkbook } from '@/utils/fileHandlers';
-import { validateAgainstTaxonomy } from '@/utils/validation';
+import { validateAgainstTaxonomyLegacy } from '@/utils/taxonomyValidation';
 import { useToast } from '@/hooks/use-toast';
 import { runCleanup } from '@/lib/runCleanup';
 import { normHeader } from '@/utils/normalize';
@@ -82,7 +82,7 @@ const Index = () => {
 
     console.log('columnsToValidate', columnsToValidate);
 
-    const issues = validateAgainstTaxonomy(currentData, fixedTax, columnsToValidate);
+    const issues = validateAgainstTaxonomyLegacy(currentData, fixedTax, columnsToValidate);
     setValidationIssues(issues);
   };
 
@@ -91,14 +91,30 @@ const Index = () => {
     if (change) setChanges(prev => [...prev, change]);
   };
 
-  const handleRunCleanup = () => {
-    const { rows, errors } = runCleanup(currentData);
-    setCurrentData(rows);
-    runValidation();
-    toast({
-      title: 'Cleanup completed',
-      description: `Rows processed: ${rows.length}${errors?.length ? `, ${errors.length} warnings` : ''}`,
-    });
+  const handleRunCleanup = async () => {
+    if (!currentData.length) return;
+    
+    try {
+      // Create a temporary File from current data for runCleanup
+      const csvContent = currentData.map(row => 
+        Object.values(row).map(v => `"${String(v ?? '')}"`).join(',')
+      ).join('\n');
+      const csvFile = new File([csvContent], 'data.csv', { type: 'text/csv' });
+      
+      const result = await runCleanup(csvFile);
+      setCurrentData(result.cleaned as any[]);
+      
+      toast({
+        title: 'Cleanup completed',
+        description: `Mode: ${result.mode}, Rows: ${result.cleaned.length}, Issues: ${Object.keys(result.summary).length}`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Cleanup failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive'
+      });
+    }
   };
 
   const handleReset = () => {
