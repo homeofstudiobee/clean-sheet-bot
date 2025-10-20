@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Runbook – Weekly Dentsu Connect Data Cleaning</title>
+<style>
+body{margin:0;padding:0;background:#ffffff}
+.container{max-width:640px;margin:0 auto;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111}
+h1{font-size:20px;margin:0 0 12px 0}
+h2{font-size:16px;margin:16px 0 8px 0}
+p{margin:0 0 12px 0}
+ul,ol{margin:0 0 12px 20px;padding:0}
+li{margin:0 0 8px 0}
+code,pre{font-family:Consolas,Menlo,Monaco,monospace;font-size:13px;background:#f5f5f5;padding:2px 4px;border-radius:3px}
+pre{padding:10px;white-space:pre-wrap;word-wrap:break-word}
+.note{font-size:12px;color:#666;margin-top:16px}
+</style></head>
+<body><div class="container">
+  <h1>Runbook – Weekly Dentsu Connect Data Cleaning</h1>
+
+  <h2>Step 1 – Pull data</h2>
+  <ul>
+    <li>Export <span class="bold">Plan data all data</span> for 2024 + 2025 + 2026.</li>
+    <li>Export <span class="bold">Budget vs Planned vs Actual</span> for 2024 + 2025 + 2026.</li>
+    <li>Save files in <code>input/raw/</code> as <code>plans_2024.xlsx</code>, <code>plans_2025.xlsx</code>, <code>plans_2026.xlsx</code>, <code>budgets_2024.xlsx</code>, <code>budgets_2025.xlsx</code>, <code>budgets_2026.xlsx</code>.</li>
+  </ul>
+
+  <h2>Step 2 – Run cleaning</h2>
+  <pre>conda activate dc_clean
+python scripts/run_cleaning.py</pre>
+
+  <p class="note">Tip: For long runbooks, consider sharing a link to the source doc instead of emailing the full steps.</p>
+</div></body></html>

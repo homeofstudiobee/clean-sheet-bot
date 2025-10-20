@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Product Team Requests – Dentsu Connect Enhancements</title>
+<style>
+body{margin:0;padding:0;background:#ffffff}
+.container{max-width:640px;margin:0 auto;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111}
+h1{font-size:20px;margin:0 0 12px 0}
+h2{font-size:16px;margin:16px 0 8px 0}
+p{margin:0 0 12px 0}
+ul,ol{margin:0 0 12px 20px;padding:0}
+li{margin:0 0 8px 0}
+.bold{font-weight:bold}
+.note{font-size:12px;color:#666;margin-top:16px}
+</style></head>
+<body><div class="container">
+  <h1>Product Team Requests – Dentsu Connect Enhancements</h1>
+  <p>To reduce weekly manual cleanup, we request:</p>
+  <ol>
+    <li><span class="bold">Field Completeness</span>
+      <ul>
+        <li>Enforce mandatory: Market, Region, Plan ID, Plan Name, Plan Status, Start/End Dates, Currency, Objective, Buying Method, Innovation, Inventory Buy, Creative Source, Vendor.</li>
+      </ul>
+    </li>
+    <li><span class="bold">Objective Taxonomy</span>
+      <ul><li>Restrict Objectives to: Awareness, Consideration, Engagement, Loyalty, Sales/Trial.</li></ul>
+    </li>
+    <li><span class="bold">Brand &amp; Variant</span>
+      <ul>
+        <li>Normalize Brand/Variant at point of entry (use Carlsberg taxonomy file).</li>
+        <li>Prevent mismatch (e.g., Plan Name says Tuborg but Brand field = Carlsberg).</li>
+      </ul>
+    </li>
+    <li><span class="bold">Vendor</span>
+      <ul>
+        <li>Normalize Vendor names.</li>
+        <li>Provide canonical Vendor + Vendor House + Vendor Type.</li>
+      </ul>
+    </li>
+    <li><span class="bold">CBHT</span>
+      <ul><li>Auto-attach CBHT Study/Report Source/Brand League by (Brand, Market, FX Year).</li></ul>
+    </li>
+    <li><span class="bold">FX</span>
+      <ul><li>Auto-attach FX rates by (Currency, FX Year) from Carlsberg Finance files.</li></ul>
+    </li>
+    <li><span class="bold">Data Export</span>
+      <ul>
+        <li>Ensure exports are:</li>
+        <li>• Without totals rows</li>
+        <li>• Stable header names (no shifts)</li>
+        <li>• Dates in ISO (YYYY-MM-DD)</li>
+      </ul>
+    </li>
+    <li><span class="bold">Correction Workflow (Future)</span>
+      <ul>
+        <li>Provide API/endpoint to accept corrected values back from QA pipeline.</li>
+        <li>Auto-ingest taxonomy updates and reduce manual VLOOKUPs.</li>
+      </ul>
+    </li>
+  </ol>
+  <p>These changes would significantly reduce weekly QA load and accelerate client reporting.</p>
+  <p class="note">Optional: Add {{Owner}} / {{DueDate}} fields if using as a request email.</p>
+</div></body></html>
