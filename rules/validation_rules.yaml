@@ -1,0 +1,93 @@
+# Required admin fields and defaults
+allowed_objectives: [Awareness, Consideration, Engagement, Loyalty, Sales/Trial]
+
+defaults:
+  Plan Status: Planned
+  Buying Model: Fixed Cost
+  Innovation: No
+  Inventory Buy: No
+  Creative Source: Locally Produced Asset
+
+temporary_fills:
+  Objective: Awareness
+
+# Placeholder dates when metrics exist but dates missing
+date_placeholders:
+  start_if_missing: "01-Jan-{FX_Year}"
+  end_if_missing:   "31-Dec-{FX_Year}"
+
+# Brand/category/subcategory/variant mapping from taxonomy/brands.csv
+brand_mapping:
+  precedence:
+    - [market, raw_brand, raw_variant]
+    - [market, raw_brand]
+    - [raw_brand, raw_variant]
+    - [raw_brand]
+  outputs:
+    brand_clean: Brand_clean
+    brand_type:  Brand_Type
+    category:    Category_clean
+    subcategory: SubCategory_clean
+    variant:     Variant_clean
+  conflict_hints:
+    brand_regex:
+      Carlsberg: "(?i)\\bcarlsberg\\b"
+      Tuborg: "(?i)\\btuborg\\b"
+      1664: "(?i)\\b1664\\b"
+
+# Campaign mapping from taxonomy/campaigns.csv
+campaign_mapping:
+  precedence:
+    - [market, brand, raw_campaign]
+    - [market, raw_campaign]
+    - [brand, raw_campaign]
+  outputs:
+    campaign_clean:  Campaign_clean
+    campaign_type:   Campaign_Type
+    campaign_subtype: Campaign_SubType
+
+# Vendor mapping (taxonomy/vendors.csv) – direct by raw_vendor
+# (no extra config needed)
+
+# Channel taxonomy (taxonomy/channels.csv)
+channel_rules:
+  prefer_key: Sub-Channel   # or "Channel"
+
+# Region QA by fx_rates.csv (Market -> Region)
+region_check:
+  enabled: true
+
+# Backfill actualisation if line is older than N days & actual blank/zero
+actualisation_backfill:
+  enabled: true
+  age_days_threshold: 30
+  local:
+    actual_col:  "Total Cost to Client Actual (Local)"
+    planned_col: "Total Cost to Client (Local)"
+    qa_flag:     "missing_actualisation_local"
+  global:
+    actual_col:  "Total Cost to Client Actual (Global)"
+    planned_col: "Total Cost to Client (Global)"
+    qa_flag:     "missing_actualisation_global"
+
+# FX conversion & audits using taxonomy/fx_rates.csv keyed by (market, currency, fx_year)
+fx_rules:
+  compute_pairs:
+    dkk:
+      - ["Net Media Cost (Local)",                "Net_Media_DKK"]
+      - ["Total Cost to Client (Local)",          "Planned_Spend_DKK"]
+      - ["Total Cost to Client Actual (Local)",   "Actualised_Spend_DKK"]
+    eur:
+      - ["Net Media Cost (Local)",                "Net_Media_EUR"]
+      - ["Total Cost to Client (Local)",          "Planned_Spend_EUR"]
+      - ["Total Cost to Client Actual (Local)",   "Actualised_Spend_EUR"]
+  audit_global_vs_eur:
+    enabled: true
+    tolerance_ratio: 0.02  # 2% deviation triggers QA
+
+# CBHT join using taxonomy/cbht.csv
+cbht_rules:
+  join_keys_order:
+    - ["Brand_clean","Market","FX_Year"]
+    - ["Brand_clean","Market"]
+    - ["Brand_clean"]
